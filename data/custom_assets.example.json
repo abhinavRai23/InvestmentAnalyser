@@ -1,0 +1,27 @@
+[
+  {
+    "id": "sample-savings-1",
+    "ownerId": "Self",
+    "category": "Savings Account",
+    "institution": "HDFC Bank",
+    "accountNumber": "50100XXXXXXX",
+    "investedValue": 150000,
+    "currentValue": 150000,
+    "interestRate": 3.0,
+    "minimumBalance": 25000,
+    "maturityDate": "Indefinite",
+    "notes": "Emergency buffer"
+  },
+  {
+    "id": "sample-fd-1",
+    "ownerId": "Self",
+    "category": "FD",
+    "institution": "State Bank of India (SBI)",
+    "accountNumber": "FD-9876XXXX",
+    "investedValue": 500000,
+    "currentValue": 500000,
+    "interestRate": 7.1,
+    "maturityDate": "2027-10-15",
+    "notes": "3 Year Term Deposit"
+  }
+]
