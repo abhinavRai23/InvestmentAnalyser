@@ -37,7 +37,8 @@ yarn-error.log*
 # personal portfolio data & reports (privacy protection)
 data/reports/*
 !data/reports/.gitkeep
-data/custom_assets.json
+data/*.xlsx
+data/custom_assets*.json
 !data/custom_assets.example.json
 
 # vercel

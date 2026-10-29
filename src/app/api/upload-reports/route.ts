@@ -6,6 +6,13 @@ import { parseExcelStatement, parseCustomAssetsExcel, combinePortfolios, generat
 import { getMFHoldingsData } from '@/lib/dataProvider';
 import { PortfolioData, CustomAsset, Person, Holding } from '@/lib/types';
 
+function isLocalModeEnabled(): boolean {
+  const isDev = process.env.NODE_ENV === 'development';
+  const isExplicitlyDisabled = process.env.ENABLE_LOCAL_PORTFOLIO === 'false';
+  const isExplicitlyEnabled = process.env.ENABLE_LOCAL_PORTFOLIO === 'true';
+  return isExplicitlyEnabled || (isDev && !isExplicitlyDisabled);
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
@@ -15,7 +22,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 });
     }
 
-    const isLocalMode = process.env.ENABLE_LOCAL_PORTFOLIO === 'true';
+    const isLocalMode = isLocalModeEnabled();
     const reportsDir = path.join(process.cwd(), 'data', 'reports');
 
     if (isLocalMode && !fs.existsSync(reportsDir)) {
@@ -159,8 +166,8 @@ export async function GET(request: Request) {
       });
     }
 
-    // Security check: Only list server disk files if local mode is explicitly enabled
-    if (process.env.ENABLE_LOCAL_PORTFOLIO !== 'true') {
+    // Security check: Only list server disk files if local mode is enabled
+    if (!isLocalModeEnabled()) {
       return NextResponse.json({ files: [] });
     }
 

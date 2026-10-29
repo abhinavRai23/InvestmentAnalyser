@@ -18,6 +18,7 @@ interface PortfolioState {
   clearPortfolio: () => void;
   exportPortfolioBackup: () => void;
   loadDemoPortfolio: () => void;
+  removePerson: (personId: string) => void;
   setFilter: (key: 'selectedOwnerIds' | 'ownerId' | 'assetType', value: any) => void;
   resetFilters: () => void;
   syncLivePrices: () => Promise<void>;
@@ -95,13 +96,37 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },
+  removePerson: (personId: string) => {
+    const current = get().data;
+    if (!current) return;
+    const remainingPeople = current.people.filter(p => p.id !== personId && p.name !== personId);
+    const remainingHoldings = current.holdings.filter(h => h.ownerId !== personId);
+    const remainingCustom = (current.customAssets || []).filter(ca => ca.ownerId !== personId);
+
+    if (remainingPeople.length === 0 || (remainingHoldings.length === 0 && remainingCustom.length === 0)) {
+      get().clearPortfolio();
+      return;
+    }
+
+    const updated: PortfolioData = {
+      ...current,
+      people: remainingPeople,
+      holdings: remainingHoldings,
+      customAssets: remainingCustom
+    };
+    get().setData(updated);
+  },
   loadDemoPortfolio: () => {
     const demoData: PortfolioData = {
-      people: [{ id: "Demo Investor", name: "Demo Investor" }],
+      people: [
+        { id: "Person A", name: "Person A" },
+        { id: "Person B", name: "Person B" }
+      ],
       holdings: [
+        // --- Person A Holdings ---
         {
-          id: "demo-h1",
-          ownerId: "Demo Investor",
+          id: "demo-a-h1",
+          ownerId: "Person A",
           name: "Parag Parikh Flexi Cap Fund Direct Growth",
           assetType: "mutual_fund",
           investedValue: 250000,
@@ -111,11 +136,14 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
           xirr: 21.4,
           strategicAssetClass: "EQUITY" as StrategicAssetClass,
           productType: "MF_ACTIVE" as ProductType,
-          category: "Equity: Flexi Cap"
+          category: "Equity: Flexi Cap",
+          subCategory: "Flexi Cap Fund",
+          amc: "PPFAS Mutual Fund",
+          isin: "INF879O01019"
         },
         {
-          id: "demo-h2",
-          ownerId: "Demo Investor",
+          id: "demo-a-h2",
+          ownerId: "Person A",
           name: "Mirae Asset Large Cap Fund Direct Growth",
           assetType: "mutual_fund",
           investedValue: 200000,
@@ -125,25 +153,14 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
           xirr: 16.8,
           strategicAssetClass: "EQUITY" as StrategicAssetClass,
           productType: "MF_ACTIVE" as ProductType,
-          category: "Equity: Large Cap"
+          category: "Equity: Large Cap",
+          subCategory: "Large Cap Fund",
+          amc: "Mirae Asset Mutual Fund",
+          isin: "INF769I01010"
         },
         {
-          id: "demo-h3",
-          ownerId: "Demo Investor",
-          name: "Motilal Oswal Midcap Fund Direct Growth",
-          assetType: "mutual_fund",
-          investedValue: 150000,
-          currentValue: 198000,
-          absoluteReturn: 48000,
-          returnPercentage: 32.0,
-          xirr: 24.2,
-          strategicAssetClass: "EQUITY" as StrategicAssetClass,
-          productType: "MF_ACTIVE" as ProductType,
-          category: "Equity: Mid Cap"
-        },
-        {
-          id: "demo-h4",
-          ownerId: "Demo Investor",
+          id: "demo-a-h3",
+          ownerId: "Person A",
           name: "HDFC Bank Ltd.",
           assetType: "stock",
           quantity: 80,
@@ -154,11 +171,66 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
           absoluteReturn: 17600,
           returnPercentage: 14.67,
           strategicAssetClass: "EQUITY" as StrategicAssetClass,
-          productType: "STOCK_DIRECT" as ProductType
+          productType: "STOCK_DIRECT" as ProductType,
+          category: "Banking",
+          isin: "INE040A01034"
         },
         {
-          id: "demo-h5",
-          ownerId: "Demo Investor",
+          id: "demo-a-h4",
+          ownerId: "Person A",
+          name: "Reliance Industries Ltd.",
+          assetType: "stock",
+          quantity: 50,
+          averagePrice: 2400,
+          marketPrice: 2750,
+          investedValue: 120000,
+          currentValue: 137500,
+          absoluteReturn: 17500,
+          returnPercentage: 14.58,
+          strategicAssetClass: "EQUITY" as StrategicAssetClass,
+          productType: "STOCK_DIRECT" as ProductType,
+          category: "Energy",
+          isin: "INE002A01018"
+        },
+
+        // --- Person B Holdings ---
+        {
+          id: "demo-b-h1",
+          ownerId: "Person B",
+          name: "Motilal Oswal Midcap Fund Direct Growth",
+          assetType: "mutual_fund",
+          investedValue: 150000,
+          currentValue: 198000,
+          absoluteReturn: 48000,
+          returnPercentage: 32.0,
+          xirr: 24.2,
+          strategicAssetClass: "EQUITY" as StrategicAssetClass,
+          productType: "MF_ACTIVE" as ProductType,
+          category: "Equity: Mid Cap",
+          subCategory: "Mid Cap Fund",
+          amc: "Motilal Oswal Mutual Fund",
+          isin: "INF247L01015"
+        },
+        {
+          id: "demo-b-h2",
+          ownerId: "Person B",
+          name: "Nippon India Small Cap Fund Direct Growth",
+          assetType: "mutual_fund",
+          investedValue: 120000,
+          currentValue: 162000,
+          absoluteReturn: 42000,
+          returnPercentage: 35.0,
+          xirr: 28.5,
+          strategicAssetClass: "EQUITY" as StrategicAssetClass,
+          productType: "MF_ACTIVE" as ProductType,
+          category: "Equity: Small Cap",
+          subCategory: "Small Cap Fund",
+          amc: "Nippon India Mutual Fund",
+          isin: "INF204K01012"
+        },
+        {
+          id: "demo-b-h3",
+          ownerId: "Person B",
           name: "Tata Consultancy Services Ltd.",
           assetType: "stock",
           quantity: 30,
@@ -169,11 +241,13 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
           absoluteReturn: 18000,
           returnPercentage: 17.14,
           strategicAssetClass: "EQUITY" as StrategicAssetClass,
-          productType: "STOCK_DIRECT" as ProductType
+          productType: "STOCK_DIRECT" as ProductType,
+          category: "IT",
+          isin: "INE467B01029"
         },
         {
-          id: "demo-h6",
-          ownerId: "Demo Investor",
+          id: "demo-b-h4",
+          ownerId: "Person B",
           name: "Nippon India ETF Gold BeES",
           assetType: "gold",
           quantity: 1500,
@@ -184,53 +258,55 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
           absoluteReturn: 25500,
           returnPercentage: 30.9,
           strategicAssetClass: "COMMODITY" as StrategicAssetClass,
-          productType: "GOLD_ETF" as ProductType
+          productType: "GOLD_ETF" as ProductType,
+          category: "Commodity",
+          isin: "INF204KB17I5"
         }
       ],
       customAssets: [
         {
-          id: "demo-ca1",
-          ownerId: "Demo Investor",
+          id: "demo-a-ca1",
+          ownerId: "Person A",
           category: "Savings Account",
           institution: "HDFC Bank",
-          accountNumber: "50100492810",
-          investedValue: 125000,
-          currentValue: 125000,
+          accountNumber: "501002345678",
+          investedValue: 150000,
+          currentValue: 150000,
           interestRate: 3.0,
           notes: "Primary salary and liquid emergency buffer"
         },
         {
-          id: "demo-ca2",
-          ownerId: "Demo Investor",
+          id: "demo-a-ca2",
+          ownerId: "Person A",
           category: "FD",
           institution: "State Bank of India (SBI)",
-          accountNumber: "FD-8921049",
-          investedValue: 400000,
-          currentValue: 400000,
+          accountNumber: "FD-3829104",
+          investedValue: 500000,
+          currentValue: 500000,
           interestRate: 7.1,
-          maturityDate: "2027-10-15",
+          maturityDate: "2027-12-15",
           notes: "3-Year Fixed Deposit"
         },
         {
-          id: "demo-ca3",
-          ownerId: "Demo Investor",
+          id: "demo-b-ca1",
+          ownerId: "Person B",
           category: "PPF",
           institution: "Post Office",
-          accountNumber: "PPF-3901284",
-          investedValue: 300000,
-          currentValue: 355000,
+          accountNumber: "PPF-9081234",
+          investedValue: 280000,
+          currentValue: 320000,
           interestRate: 7.1,
           maturityDate: "2032-03-31",
           notes: "Tax saving 80C compound fund"
         },
         {
-          id: "demo-ca4",
-          ownerId: "Demo Investor",
+          id: "demo-b-ca2",
+          ownerId: "Person B",
           category: "NPS",
-          institution: "HDFC Pension Fund",
-          accountNumber: "PRAN-11004829104",
-          investedValue: 240000,
-          currentValue: 295000,
+          institution: "HDFC Pension (NSDL)",
+          accountNumber: "PRAN-110029384",
+          investedValue: 380000,
+          currentValue: 450000,
           interestRate: 10.5,
           maturityDate: "Indefinite",
           notes: "Tier-1 All-Equity & Corporate debt"
@@ -238,7 +314,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
       ]
     };
 
-    set({ data: demoData });
+    set({ data: demoData, filters: { selectedOwnerIds: ['ALL'], ownerId: 'ALL', assetType: 'ALL' } });
     persistPortfolio(demoData);
   },
   setFilter: (key, value) => set((state) => {

@@ -5,9 +5,16 @@ import { PortfolioData } from './types';
 import { getMFHoldingsData } from './dataProvider';
 
 export function getServerPortfolioData(): PortfolioData | null {
-  // Security guard: Only load server files if explicitly enabled (e.g., in local dev via .env.local).
-  // Prevents accidental leakage of personal financial data on public deployments or shared sessions.
-  if (process.env.ENABLE_LOCAL_PORTFOLIO !== 'true') {
+  // Security guard:
+  // - In development (local machine): load local data by default unless explicitly disabled with ENABLE_LOCAL_PORTFOLIO=false.
+  // - In production/deployments (Vercel, etc.): strictly disabled by default to prevent leaking private reports or bank data.
+  const isDev = process.env.NODE_ENV === 'development';
+  const isExplicitlyDisabled = process.env.ENABLE_LOCAL_PORTFOLIO === 'false';
+  const isExplicitlyEnabled = process.env.ENABLE_LOCAL_PORTFOLIO === 'true';
+
+  const shouldLoad = isExplicitlyEnabled || (isDev && !isExplicitlyDisabled);
+
+  if (!shouldLoad) {
     return null;
   }
 

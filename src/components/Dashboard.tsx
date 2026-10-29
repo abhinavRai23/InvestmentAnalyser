@@ -20,6 +20,7 @@ import { ExposureCharts } from "./dashboard/ExposureCharts";
 import { GlobalFilters } from "./dashboard/GlobalFilters";
 import { ReportUploadModal } from "./ReportUploadModal";
 import { MarketTicker } from "./MarketTicker";
+import { DemoBanner } from "./DemoBanner";
 import { useGrowwCache } from "@/hooks/useGrowwCache";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, FileSpreadsheet, Sparkles, Download, LogOut } from "lucide-react";
@@ -128,6 +129,9 @@ export function Dashboard() {
     <div className="w-full space-y-0">
       {/* Live Market Ticker Bar (Sensex, Nifty, Gold 10g, Silver 1kg, USD/INR) - Full Width Sticky Top */}
       <MarketTicker />
+
+      {/* Interactive Demo Mode Banner (shown when viewing Person A & Person B demo data) */}
+      <DemoBanner />
 
       {/* Full-Width Main Content Container */}
       <div className="w-full px-4 sm:px-6 pt-3 space-y-4">

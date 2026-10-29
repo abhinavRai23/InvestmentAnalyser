@@ -5,13 +5,11 @@ import { usePortfolioStore, loadStoredPortfolio } from "@/store/portfolioStore";
 import { PortfolioData } from "@/lib/types";
 
 export default function StoreInitializer({ initialData }: { initialData: PortfolioData | null }) {
-  const initialized = useRef(false);
+  const lastDataRef = useRef<PortfolioData | null>(null);
 
-  if (!initialized.current) {
-    if (initialData) {
-      usePortfolioStore.getState().setData(initialData);
-    }
-    initialized.current = true;
+  if (initialData && lastDataRef.current !== initialData) {
+    usePortfolioStore.getState().setData(initialData);
+    lastDataRef.current = initialData;
   }
 
   useEffect(() => {

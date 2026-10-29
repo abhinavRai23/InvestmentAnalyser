@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { 
   Upload, 
   FileSpreadsheet, 
@@ -18,7 +19,8 @@ import {
   Building2,
   PieChart,
   HelpCircle,
-  FileCode
+  FileCode,
+  Users
 } from "lucide-react";
 
 export function WelcomeScreen() {
@@ -184,6 +186,33 @@ export function WelcomeScreen() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
+              <Select
+                onValueChange={(url) => {
+                  if (typeof url === "string" && url) window.open(url, "_blank");
+                }}
+              >
+                <SelectTrigger className="h-8 text-xs w-[170px] bg-background">
+                  <SelectValue placeholder="📥 Download Sample Files" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="/sample-files/Mutual_Funds_Person_A.xlsx" className="text-xs">
+                    Person A: Mutual Funds (.xlsx)
+                  </SelectItem>
+                  <SelectItem value="/sample-files/Stocks_Holdings_Person_A.xlsx" className="text-xs">
+                    Person A: Stocks (.xlsx)
+                  </SelectItem>
+                  <SelectItem value="/sample-files/Mutual_Funds_Person_B.xlsx" className="text-xs">
+                    Person B: Mutual Funds (.xlsx)
+                  </SelectItem>
+                  <SelectItem value="/sample-files/Stocks_Holdings_Person_B.xlsx" className="text-xs">
+                    Person B: Stocks (.xlsx)
+                  </SelectItem>
+                  <SelectItem value="/sample-files/Bank_and_FD_Sample_Person_A_B.xlsx" className="text-xs">
+                    Bank & FDs Sample (.xlsx)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+
               <Button
                 variant="outline"
                 size="sm"
@@ -191,17 +220,17 @@ export function WelcomeScreen() {
                 className="gap-1.5 text-xs h-8"
               >
                 <Download className="h-3.5 w-3.5 text-emerald-600" />
-                <span>Bank & FD Excel Template</span>
+                <span>Bank/FD Template</span>
               </Button>
 
               <Button
                 variant="secondary"
                 size="sm"
                 onClick={loadDemoPortfolio}
-                className="gap-1.5 text-xs h-8 bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 border border-amber-500/30"
+                className="gap-1.5 text-xs h-8 bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 border border-amber-500/30 font-semibold"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>Explore Demo Portfolio</span>
+                <span>Explore Demo Family</span>
               </Button>
             </div>
           </div>

@@ -6,10 +6,17 @@ function getCustomAssetsFilePath(): string {
   return path.join(process.cwd(), 'data', 'custom_assets.json');
 }
 
+function isLocalModeEnabled(): boolean {
+  const isDev = process.env.NODE_ENV === 'development';
+  const isExplicitlyDisabled = process.env.ENABLE_LOCAL_PORTFOLIO === 'false';
+  const isExplicitlyEnabled = process.env.ENABLE_LOCAL_PORTFOLIO === 'true';
+  return isExplicitlyEnabled || (isDev && !isExplicitlyDisabled);
+}
+
 export async function GET() {
   try {
     // Only return server-stored custom assets if local portfolio mode is enabled
-    if (process.env.ENABLE_LOCAL_PORTFOLIO !== 'true') {
+    if (!isLocalModeEnabled()) {
       return NextResponse.json({ customAssets: [] });
     }
 
@@ -35,7 +42,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'customAssets must be an array' }, { status: 400 });
     }
 
-    if (process.env.ENABLE_LOCAL_PORTFOLIO !== 'true') {
+    if (!isLocalModeEnabled()) {
       // In shared/deployed mode, assets are safely stored in browser localStorage
       return NextResponse.json({ success: true, customAssets, savedToDisk: false });
     }
