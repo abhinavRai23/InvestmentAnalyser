@@ -1,18 +1,40 @@
 "use client";
 
-import { Suspense } from "react";
-import { usePortfolioStore } from "@/store/portfolioStore";
+import { Suspense, useEffect, useState } from "react";
+import { usePortfolioStore, loadStoredPortfolio } from "@/store/portfolioStore";
 import { Dashboard } from "@/components/Dashboard";
 import { WelcomeScreen } from "@/components/WelcomeScreen";
-import StoreInitializer from "@/components/StoreInitializer";
 import { PortfolioData } from "@/lib/types";
 
 export function PortfolioContainer({ initialData }: { initialData: PortfolioData | null }) {
+  const [isReady, setIsReady] = useState(false);
   const data = usePortfolioStore((state) => state.data);
+
+  useEffect(() => {
+    if (initialData) {
+      usePortfolioStore.getState().setData(initialData);
+    } else {
+      const current = usePortfolioStore.getState().data;
+      if (!current) {
+        const stored = loadStoredPortfolio();
+        if (stored) {
+          usePortfolioStore.getState().setData(stored);
+        }
+      }
+    }
+    setIsReady(true);
+  }, [initialData]);
+
+  if (!isReady && !data) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="h-7 w-7 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div>
-      <StoreInitializer initialData={initialData} />
       {!data ? (
         <WelcomeScreen />
       ) : (
@@ -23,4 +45,3 @@ export function PortfolioContainer({ initialData }: { initialData: PortfolioData
     </div>
   );
 }
-
