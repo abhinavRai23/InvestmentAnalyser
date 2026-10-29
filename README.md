@@ -2,7 +2,9 @@
 
 A comprehensive, multi-asset portfolio intelligence and analytics platform designed specifically for Indian investors. Track, analyze, and optimize your entire family's wealth across Mutual Funds, Direct Stocks, Gold/Silver ETFs, Sovereign Gold Bonds (SGBs), Fixed Deposits (FDs), Savings Accounts, PPF, and NPS.
 
-![Investment Analyser Preview](./public/preview.png)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/abhinavRai23/InvestmentAnalyser/main/public/dashboard-preview.png" alt="Investment Analyser Preview" width="100%" />
+</p>
 
 ---
 
