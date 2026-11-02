@@ -6,8 +6,8 @@ import {
   fetchYahooStockPrice,
   fetchYahooStockPricesBatch,
   resolveYahooTicker,
-  getGoldSpotRatePerGram,
 } from '@/lib/providers/yahooFinance';
+import { fetchSgbLivePrice } from '@/lib/providers/sgb';
 import { LiveData } from '@/lib/providers/types';
 
 export async function POST(req: Request) {
@@ -53,13 +53,7 @@ export async function POST(req: Request) {
       .filter((s): s is string => typeof s === 'string' && s.length > 0);
     const batchQuoteMap = await fetchYahooStockPricesBatch(symbolsToBatch);
 
-    // 3. Fetch gold spot rate for SGB valuation
-    let goldSpot: LiveData | null = null;
-    if (sgbAssets.length > 0) {
-      goldSpot = await getGoldSpotRatePerGram();
-    }
-
-    // 4. Resolve enriched data for each asset
+    // 3. Resolve enriched data for each asset
     const loggedWarnings = new Set<string>();
     const results = await Promise.all(
       assets.map(async (asset: { id: string; name: string; type: string; isin?: string }) => {
@@ -86,17 +80,7 @@ export async function POST(req: Request) {
             liveData = await fetchMfapiNav(asset.name);
           }
         } else if (asset.type === 'sgb' || upperName.includes('GOLDBOND') || upperName.includes('SGB')) {
-          // SGBs: Valued at 24k physical gold spot rate.
-          // On Groww/NSE demat, SGBs have 0.00% daily change (illiquid secondary tranches do not track intraday equity swings).
-          if (goldSpot) {
-            liveData = {
-              price: goldSpot.price,
-              date: goldSpot.date,
-              change: 0,
-              changePct: 0,
-              return1y: goldSpot.return1y,
-            };
-          }
+          liveData = await fetchSgbLivePrice(asset.isin, asset.name);
         } else if (['stock', 'etf', 'gold', 'silver'].includes(asset.type)) {
           const symbol = resolveYahooTicker(asset.name);
           if (symbol && batchQuoteMap.has(symbol.toUpperCase())) {

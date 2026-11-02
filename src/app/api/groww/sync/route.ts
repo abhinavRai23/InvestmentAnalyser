@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { logSync } from '@/lib/syncLogger';
+import { fetchSgbLivePrice } from '@/lib/providers/sgb';
 
 /** Groww mutual-fund / ETF scheme search + details fetch.
  *  Only call this for mutual_fund and ETF asset types — NOT for raw stocks or SGBs. */
@@ -261,9 +262,44 @@ export async function POST(request: Request) {
         upperName.includes('%GOLDBONDS') ||
         upperName.startsWith('SGB');
 
-      // SGBs: no Groww metadata needed — skip entirely
       if (isSgb) {
-        debugSummary.push({ name: holding.name, isin: holding.isin, outcome: 'SKIPPED_SGB' });
+        const sgbLive = await fetchSgbLivePrice(holding.isin, holding.name);
+        if (sgbLive && sgbLive.price > 0) {
+          const now = new Date().toISOString();
+          const sgbData = {
+            scheme_name: holding.name,
+            fund_name: holding.name,
+            nav: sgbLive.price,
+            nav_date: sgbLive.date,
+            category: 'SGB',
+            isin: holding.isin || null,
+            return_stats: [{ return1d: sgbLive.changePct }],
+            simple_return: { return1d: sgbLive.changePct },
+          };
+
+          const keys = [holding.isin, holding.name].filter(Boolean) as string[];
+          for (const k of keys) {
+            insertCacheStmt.run(
+              k, holding.isin || null, holding.name,
+              sgbLive.price, sgbLive.date, 'SGB', null, null, null, null, null, null,
+              JSON.stringify(sgbData), now
+            );
+            newCache[k] = sgbData;
+          }
+
+          updatedCount++;
+          logSync({
+            level: 'SUCCESS',
+            source: 'SGB',
+            assetName: holding.name,
+            isin: holding.isin,
+            message: `Synced SGB price ₹${sgbLive.price.toFixed(2)} (1D Change: ${sgbLive.changePct?.toFixed(2)}%)`,
+            details: { price: sgbLive.price, changePct: sgbLive.changePct },
+          });
+          debugSummary.push({ name: holding.name, isin: holding.isin, outcome: 'SUCCESS', price: sgbLive.price });
+        } else {
+          debugSummary.push({ name: holding.name, isin: holding.isin, outcome: 'SGB_FETCH_FAILED' });
+        }
         continue;
       }
 
