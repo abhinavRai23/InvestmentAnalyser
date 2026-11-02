@@ -11,7 +11,7 @@ interface PortfolioState {
     ownerId: string | 'ALL';
     assetType: AssetType | 'ALL';
   };
-  livePrices: Record<string, { price: number; date: string }>;
+  livePrices: Record<string, { price: number; date: string; change?: number; changePct?: number; return1y?: number }>;
   isSyncing: boolean;
   lastSynced: string | null;
   setData: (data: PortfolioData) => void;
@@ -349,8 +349,8 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     
     // Extract unique assets to fetch
     const assetsToFetch = data.holdings
-      .filter(h => h.assetType === 'mutual_fund' || h.assetType === 'stock' || h.assetType === 'etf')
-      .map(h => ({ id: h.id, name: h.name, type: h.assetType }));
+      .filter(h => ['mutual_fund', 'stock', 'etf', 'gold', 'silver', 'sgb'].includes(h.assetType))
+      .map(h => ({ id: h.id, name: h.name, type: h.assetType, isin: h.isin }));
 
     try {
       const res = await fetch('/api/enrich', {
@@ -639,17 +639,25 @@ export const useFilteredHoldings = () => {
   const deduplicated = aggregateHoldings(filtered, data.people);
 
   return deduplicated.map(h => {
-    const live = livePrices[h.id];
+    const live = livePrices[h.id] || (h.isin ? livePrices[h.isin] : undefined) || livePrices[h.name];
     if (live) {
       const qty = h.quantity ?? (h.marketPrice ? h.currentValue / h.marketPrice : 0);
       const newCurrentValue = live.price * qty;
+      const oneDayReturnAbsolute = live.change !== undefined
+        ? live.change * qty
+        : (live.changePct !== undefined ? (newCurrentValue * live.changePct / 100) : undefined);
+      const oneDayReturnPercentage = live.changePct;
+
       return {
         ...h,
         marketPrice: live.price,
         currentValue: newCurrentValue,
         absoluteReturn: newCurrentValue - h.investedValue,
-        returnPercentage: h.investedValue > 0 ? ((newCurrentValue - h.investedValue) / h.investedValue) * 100 : 0
-      };
+        returnPercentage: h.investedValue > 0 ? ((newCurrentValue - h.investedValue) / h.investedValue) * 100 : 0,
+        oneDayReturnAbsolute,
+        oneDayReturnPercentage,
+        _liveReturn1y: live.return1y,
+      } as Holding & { _liveReturn1y?: number };
     }
     return h;
   });

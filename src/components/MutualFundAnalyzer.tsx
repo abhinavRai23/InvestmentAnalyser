@@ -4,7 +4,8 @@ import { useState, useMemo } from "react";
 import { usePortfolioStore, useFilteredHoldings } from "@/store/portfolioStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, Scale, Search, X, ExternalLink, Users, User } from "lucide-react";
+import { RefreshCw, Scale, Search, X, ExternalLink, Users, User, ScrollText } from "lucide-react";
+import { SyncLogsModal } from "./SyncLogsModal";
 import { formatCurrency } from "@/lib/utils";
 import { Holding } from "@/lib/types";
 import { DataTable, ColumnDef } from "@/components/ui/data-table";
@@ -23,6 +24,7 @@ export function MutualFundAnalyzer() {
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
   const [showCompareModal, setShowCompareModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
 
   // Section-specific category filters (e.g. "Equity Mutual Funds" -> "Small Cap")
   const [sectionCategories, setSectionCategories] = useState<Record<string, string>>({});
@@ -46,14 +48,40 @@ export function MutualFundAnalyzer() {
       const mainCat = entry?.category || h.category;
       const categoryName = subCat || mainCat || "Uncategorized";
 
+      const growwNav = typeof entry?.nav === 'number' && entry.nav > 0 ? entry.nav : undefined;
+      const units = h.quantity ?? (h.marketPrice ? h.currentValue / h.marketPrice : 0);
+
+      const statementValue = h.currentValue;
+      const activeCurrentValue = growwNav && units > 0 ? units * growwNav : statementValue;
+      const activeAbsReturn = activeCurrentValue - h.investedValue;
+      const activeReturnPct = h.investedValue > 0 ? (activeAbsReturn / h.investedValue) * 100 : 0;
+
+      const ret1d = entry?.return_stats?.[0]?.return1d ?? entry?.simple_return?.return1d;
+      const oneDayPct = h.oneDayReturnPercentage ?? (typeof ret1d === 'number' ? ret1d : undefined);
+      const oneDayVal = h.oneDayReturnAbsolute ?? (oneDayPct !== undefined ? (activeCurrentValue * oneDayPct / 100) : undefined);
+
+      const ret1y = entry?.return_stats?.[0]?.return1y ?? entry?.simple_return?.return1y ?? (h as any)._liveReturn1y;
+      const oneYearPct = typeof ret1y === 'number' ? ret1y : undefined;
+      const oneYearVal = oneYearPct !== undefined ? (activeCurrentValue * oneYearPct / 100) : undefined;
+
+      const ret3y = entry?.return_stats?.[0]?.return3y ?? entry?.simple_return?.return3y;
+      const ret5y = entry?.return_stats?.[0]?.return5y ?? entry?.simple_return?.return5y;
+
       return {
         ...h,
+        currentValue: activeCurrentValue,
+        absoluteReturn: activeAbsReturn,
+        returnPercentage: activeReturnPct,
+        _growwNav: growwNav,
         _displayName: resolveDisplayName(h, growwCache),
         _rating: entry?.groww_rating || 0,
         _expense: entry?.expense_ratio || 0,
-        _ret1y: entry?.return_stats?.[0]?.return1y ?? entry?.simple_return?.return1y ?? 0,
-        _ret3y: entry?.return_stats?.[0]?.return3y ?? entry?.simple_return?.return3y ?? 0,
-        _ret5y: entry?.return_stats?.[0]?.return5y ?? entry?.simple_return?.return5y ?? 0,
+        _ret1d: oneDayPct,
+        _oneDayVal: oneDayVal,
+        _ret1y: oneYearPct,
+        _oneYearVal: oneYearVal,
+        _ret3y: typeof ret3y === 'number' ? ret3y : 0,
+        _ret5y: typeof ret5y === 'number' ? ret5y : 0,
         _category: categoryName,
         _mainCategory: mainCat || "Mutual Fund",
         _aum: entry?.aum || 0,
@@ -131,6 +159,11 @@ export function MutualFundAnalyzer() {
   const totalMfGain = totalMfValue - totalMfInvested;
   const totalMfReturnPct = totalMfInvested > 0 ? (totalMfGain / totalMfInvested) * 100 : 0;
 
+  const totalMf1DChange = useMemo(() => {
+    return enrichedHoldings.reduce((sum, h) => sum + (h._oneDayVal ?? 0), 0);
+  }, [enrichedHoldings]);
+  const totalMf1DChangePct = totalMfValue > 0 ? (totalMf1DChange / totalMfValue) * 100 : 0;
+
 
   const toggleCompare = (fundName: string) => {
     setSelectedForCompare(prev => {
@@ -201,7 +234,18 @@ export function MutualFundAnalyzer() {
       header: "Current Value",
       accessorKey: "currentValue",
       enableSorting: true,
-      cell: (row) => <span className="font-semibold">{formatCurrency(row.currentValue)}</span>,
+      cell: (row) => {
+        return (
+          <div className="flex flex-col">
+            <span className="font-semibold font-mono">{formatCurrency(row.currentValue)}</span>
+            {row._growwNav && (
+              <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                NAV: ₹{row._growwNav.toFixed(2)}
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       header: "Abs. Return",
@@ -252,21 +296,63 @@ export function MutualFundAnalyzer() {
       }
     },
     {
-      header: "1Y Ret (Groww)",
+      header: "1D Return",
+      accessorKey: "_ret1d",
+      enableSorting: true,
+      cell: (row) => {
+        const pct = row._ret1d;
+        const val = row._oneDayVal;
+        if (pct === undefined || pct === null) return <span className="text-muted-foreground">-</span>;
+        const isPos = pct >= 0;
+        return (
+          <div className="flex flex-col">
+            <span className={`font-semibold font-mono text-xs ${isPos ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+              {val !== undefined ? `${isPos ? '+' : ''}${formatCurrency(val)}` : '-'}
+            </span>
+            <span className={`text-[10px] font-mono ${isPos ? 'text-emerald-600/90 dark:text-emerald-300' : 'text-rose-600/90 dark:text-rose-300'}`}>
+              {isPos ? '+' : ''}{pct.toFixed(2)}%
+            </span>
+          </div>
+        );
+      }
+    },
+    {
+      header: "1Y Return",
       accessorKey: "_ret1y",
       enableSorting: true,
       cell: (row) => {
-        const ret = row._ret1y;
+        const pct = row._ret1y;
+        const val = row._oneYearVal;
+        if (pct === undefined || pct === null) return <span className="text-muted-foreground">-</span>;
+        const isPos = pct >= 0;
+        return (
+          <div className="flex flex-col">
+            <span className={`font-semibold font-mono text-xs ${isPos ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+              {val !== undefined ? `${isPos ? '+' : ''}${formatCurrency(val)}` : '-'}
+            </span>
+            <span className={`text-[10px] font-mono ${isPos ? 'text-emerald-600/90 dark:text-emerald-300' : 'text-rose-600/90 dark:text-rose-300'}`}>
+              {isPos ? '+' : ''}{pct.toFixed(2)}%
+            </span>
+          </div>
+        );
+      }
+    },
+    {
+      header: "3Y Ret",
+      accessorKey: "_ret3y",
+      enableSorting: true,
+      cell: (row) => {
+        const ret = row._ret3y;
         if (!ret) return <span className="text-muted-foreground">-</span>;
         return <span className={`font-medium whitespace-nowrap ${ret >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>{ret.toFixed(2)}%</span>;
       }
     },
     {
-      header: "3Y Ret (Groww)",
-      accessorKey: "_ret3y",
+      header: "5Y Ret",
+      accessorKey: "_ret5y",
       enableSorting: true,
       cell: (row) => {
-        const ret = row._ret3y;
+        const ret = row._ret5y;
         if (!ret) return <span className="text-muted-foreground">-</span>;
         return <span className={`font-medium whitespace-nowrap ${ret >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>{ret.toFixed(2)}%</span>;
       }
@@ -390,6 +476,15 @@ export function MutualFundAnalyzer() {
             <span className={`font-semibold font-mono text-xs ${totalMfGain >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
               ({totalMfGain >= 0 ? '+' : ''}{formatCurrency(totalMfGain)} / {totalMfGain >= 0 ? '+' : ''}{totalMfReturnPct.toFixed(2)}%)
             </span>
+            {totalMf1DChange !== 0 && (
+              <>
+                <span>•</span>
+                <span>1D Return: </span>
+                <span className={`font-semibold font-mono text-xs ${totalMf1DChange >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                  {totalMf1DChange >= 0 ? '+' : ''}{formatCurrency(totalMf1DChange)} ({totalMf1DChange >= 0 ? '+' : ''}{totalMf1DChangePct.toFixed(2)}%)
+                </span>
+              </>
+            )}
           </div>
 
         </div>
@@ -404,6 +499,16 @@ export function MutualFundAnalyzer() {
               Clear Compare
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsLogsOpen(true)}
+            className="gap-2 text-muted-foreground hover:text-foreground"
+            title="View SQLite sync diagnostics and logs"
+          >
+            <ScrollText className="h-4 w-4 text-amber-500" />
+            Sync Logs
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -868,6 +973,11 @@ export function MutualFundAnalyzer() {
           )}
         </DialogContent>
       </Dialog>
+
+      <SyncLogsModal
+        open={isLogsOpen}
+        onOpenChange={setIsLogsOpen}
+      />
     </div>
   );
 }

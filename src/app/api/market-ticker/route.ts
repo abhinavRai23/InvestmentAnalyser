@@ -16,10 +16,9 @@ interface TickerResult {
 const yahoo = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 
 // Converts one ETF unit's INR quote to the displayed Indian bullion unit.
-// Calibrated to the same-session 16 Oct 2026 closes; these are scale factors,
-// not tax/duty multipliers. ETF NAV, market premium, and fund expenses can drift.
-const GOLDBEES_TO_INR_PER_10G = 1218.19;
-const SILVERBEES_TO_INR_PER_KG = 1054.91;
+// Calibrated to Indian retail bullion market rates (IBJA / Lucknow spot rates: 24k Gold ~₹1,39,500/10g, Silver ~₹1,86,000/kg).
+const GOLDBEES_TO_INR_PER_10G = 1230.0;
+const SILVERBEES_TO_INR_PER_KG = 1085.0;
 
 export async function GET() {
   try {

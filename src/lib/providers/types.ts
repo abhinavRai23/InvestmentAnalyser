@@ -1,6 +1,9 @@
 export interface LiveData {
   price: number;
   date: string;
+  change?: number;
+  changePct?: number;
+  return1y?: number;
 }
 
 export interface MarketDataProvider {

@@ -25,7 +25,7 @@ export function KeyMetrics({ summary }: KeyMetricsProps) {
     return calculatePortfolioPeriodReturns(holdings, growwCache);
   }, [holdings, growwCache]);
 
-  const periodsList = ['1D', '1W', '1M', '3M', '6M', '1Y'];
+  const periodsList = ['1D', '1W', '1M', '3M', '6M', '1Y', '3Y', '5Y'];
 
   // Calculate Inflation-Adjusted (Real) Return assuming standard 6% Indian CPI annual inflation benchmark
   const inflationRatePct = 6.0;
@@ -102,7 +102,7 @@ export function KeyMetrics({ summary }: KeyMetricsProps) {
           <span className="text-[10px] text-muted-foreground">Weighted benchmark across all holdings</span>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
           {periodsList.map((p) => {
             const item = periodReturns[p];
             if (!item) return null;

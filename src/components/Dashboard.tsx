@@ -23,7 +23,8 @@ import { MarketTicker } from "./MarketTicker";
 import { DemoBanner } from "./DemoBanner";
 import { useGrowwCache } from "@/hooks/useGrowwCache";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, FileSpreadsheet, Sparkles, Download, LogOut } from "lucide-react";
+import { RefreshCw, FileSpreadsheet, Sparkles, Download, LogOut, ScrollText } from "lucide-react";
+import { SyncLogsModal } from "./SyncLogsModal";
 
 
 export function Dashboard() {
@@ -34,6 +35,7 @@ export function Dashboard() {
     resetFilters,
     isSyncing,
     syncLivePrices,
+    livePrices,
     exportPortfolioBackup,
     clearPortfolio
   } = usePortfolioStore();
@@ -48,6 +50,7 @@ export function Dashboard() {
   const [activeTab, setActiveTabState] = useState<string>(initialTab);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isSyncingCombined, setIsSyncingCombined] = useState(false);
+  const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
 
   const handleSyncAll = async () => {
     if (!data?.holdings || isSyncingCombined || isSyncing || isSyncingGroww) return;
@@ -76,12 +79,61 @@ export function Dashboard() {
     if (urlTab && urlTab !== activeTab) {
       setActiveTabState(urlTab);
     }
-  }, [searchParams]);
+
+    const ownerParam = searchParams.get("owner") || searchParams.get("ownerId") || searchParams.get("person");
+    if (ownerParam) {
+      const ids = ownerParam.split(",").map((s) => decodeURIComponent(s.trim())).filter(Boolean);
+      if (ids.length > 0) {
+        const currentIds = filters.selectedOwnerIds || [];
+        const isSame = currentIds.length === ids.length && currentIds.every((id, idx) => id === ids[idx]);
+        if (!isSame) {
+          setFilter("selectedOwnerIds", ids);
+        }
+      }
+    }
+
+    const assetParam = searchParams.get("assetType");
+    if (assetParam && assetParam !== filters.assetType) {
+      setFilter("assetType", assetParam);
+    }
+  }, [searchParams, activeTab, filters.selectedOwnerIds, filters.assetType]);
+
+  // Auto-sync live prices and 1D returns in background on initial load if not yet populated
+  useEffect(() => {
+    if (data?.holdings && data.holdings.length > 0 && !isSyncing && Object.keys(livePrices).length === 0) {
+      syncLivePrices();
+    }
+  }, [data?.holdings?.length]);
 
   const handleTabChange = (tab: string) => {
     setActiveTabState(tab);
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", tab);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const handleOwnerChange = (ids: string[]) => {
+    setFilter("selectedOwnerIds", ids);
+    const params = new URLSearchParams(searchParams.toString());
+    const isAll = ids.includes("ALL") || ids.length === 0 || (data?.people && ids.length === data.people.length);
+    if (isAll) {
+      params.delete("owner");
+      params.delete("ownerId");
+      params.delete("person");
+    } else {
+      params.set("owner", ids.join(","));
+    }
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const handleAssetTypeChange = (val: string) => {
+    setFilter("assetType", val);
+    const params = new URLSearchParams(searchParams.toString());
+    if (val === "ALL") {
+      params.delete("assetType");
+    } else {
+      params.set("assetType", val);
+    }
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
@@ -141,9 +193,9 @@ export function Dashboard() {
             <GlobalFilters
               people={data.people}
               selectedOwnerIds={selectedOwnerIds}
-              setSelectedOwnerIds={(ids) => setFilter('selectedOwnerIds', ids)}
+              setSelectedOwnerIds={handleOwnerChange}
               assetType={filters.assetType}
-              setAssetType={(v) => setFilter('assetType', v)}
+              setAssetType={handleAssetTypeChange}
             />
 
             <Button
@@ -178,6 +230,17 @@ export function Dashboard() {
             >
               <Download className="h-3.5 w-3.5 text-blue-500" />
               <span>Export Backup (.json)</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsLogsModalOpen(true)}
+              className="h-8 text-xs gap-1.5 bg-background border-border hover:bg-muted font-medium shadow-2xs text-muted-foreground hover:text-foreground"
+              title="View SQLite sync diagnostics, error logs, and data provider events"
+            >
+              <ScrollText className="h-3.5 w-3.5 text-amber-500" />
+              <span>Sync Logs</span>
             </Button>
 
             <Button
@@ -247,6 +310,11 @@ export function Dashboard() {
             <ActionCenter />
           </TabsContent>
         </Tabs>
+
+        <SyncLogsModal
+          open={isLogsModalOpen}
+          onOpenChange={setIsLogsModalOpen}
+        />
       </div>
     </div>
   );

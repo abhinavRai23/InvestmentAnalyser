@@ -126,6 +126,8 @@ export function calculatePortfolioPeriodReturns(
     { key: '3m', label: '3 Months', period: '3M' },
     { key: '6m', label: '6 Months', period: '6M' },
     { key: '1y', label: '1 Year', period: '1Y' },
+    { key: '3y', label: '3 Years', period: '3Y' },
+    { key: '5y', label: '5 Years', period: '5Y' },
   ];
 
   const result: Record<string, PeriodReturnItem> = {};
@@ -136,10 +138,44 @@ export function calculatePortfolioPeriodReturns(
     let totalValEvaluated = 0;
 
     for (const h of holdings) {
+      if (cfg.key === '1d') {
+        // Precise 1D resolution: check holding's live 1D return absolute or percentage first
+        const entry = (h.isin && cache[h.isin]) || cache[h.name];
+        let gain: number | undefined = undefined;
+
+        if (typeof h.oneDayReturnAbsolute === 'number' && !isNaN(h.oneDayReturnAbsolute)) {
+          gain = h.oneDayReturnAbsolute;
+        } else if (typeof h.oneDayReturnPercentage === 'number' && !isNaN(h.oneDayReturnPercentage)) {
+          gain = (h.currentValue * h.oneDayReturnPercentage) / 100;
+        } else if (entry) {
+          const ret = entry.return_stats?.[0]?.return1d ?? entry.simple_return?.return1d;
+          if (typeof ret === 'number') {
+            gain = (h.currentValue * ret) / 100;
+          }
+        }
+
+        if (gain !== undefined) {
+          totalWeightedGain += gain;
+          totalValEvaluated += h.currentValue;
+        }
+        continue;
+      }
+
       const entry = (h.isin && cache[h.isin]) || cache[h.name];
+
+      if (cfg.key === '1y') {
+        const live1y = (h as any)._liveReturn1y;
+        const ret1y = typeof live1y === 'number' ? live1y : (entry?.return_stats?.[0]?.return1y ?? entry?.simple_return?.return1y);
+        if (typeof ret1y === 'number') {
+          totalWeightedGain += h.currentValue * (ret1y / 100);
+          totalValEvaluated += h.currentValue;
+          continue;
+        }
+      }
+
       if (entry) {
         const ret = entry.return_stats?.[0]?.[keyName] ?? entry.simple_return?.[keyName];
-        if (ret !== undefined && ret !== null) {
+        if (ret !== undefined && ret !== null && typeof ret === 'number') {
           totalWeightedGain += h.currentValue * (ret / 100);
           totalValEvaluated += h.currentValue;
         }

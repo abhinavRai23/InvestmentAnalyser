@@ -25,24 +25,57 @@ export function resolveDisplayName(
   return staticDisplayName(holding.name) || holding.name;
 }
 
+export const SGB_GROWW_MAP: Record<string, string> = {
+  // ISIN mappings
+  "IN0020230093": "sgbsep31ii",
+  "IN0020230069": "sgbjun31i",
+  "IN0020210178": "sgbnv29vii",
+  "IN0020230168": "sgbde31iii",
+  "IN0020230184": "sgbfeb32iv",
+  // Statement Name mappings
+  "2.50%GOLDBONDS2031SR-II": "sgbsep31ii",
+  "2.50%GOLDBONDS2031SR-I": "sgbjun31i",
+  "2.5%GOLDBONDS2029SR-VII": "sgbnv29vii",
+  "2.50%GOLDBONDS2031SR-III": "sgbde31iii",
+  "2.50%GOLDBONDS2032SR-IV": "sgbfeb32iv",
+};
+
 /**
  * Resolves external page URL on Groww for a given holding.
- * Uses search_id from Groww cache if available, or falls back to Groww search URL.
+ * Uses search_id from Groww cache if available, or falls back to exact security URL / search.
  */
 export function getGrowwUrl(
   holding: { name: string; isin?: string; assetType?: string },
   cache: Record<string, any>,
 ): string {
+  const upper = holding.name.toUpperCase();
+  const isSgb =
+    holding.assetType === "sgb" ||
+    upper.includes("GOLDBOND") ||
+    upper.includes("SGB");
+
+  if (isSgb) {
+    const sgbSlug =
+      (holding.isin && SGB_GROWW_MAP[holding.isin]) ||
+      SGB_GROWW_MAP[holding.name] ||
+      SGB_GROWW_MAP[upper];
+    if (sgbSlug) {
+      return `https://groww.in/stocks/${sgbSlug}`;
+    }
+  }
+
   const entry = (holding.isin && cache[holding.isin]) || cache[holding.name];
   const searchId =
     entry?.search_id || entry?.header?.searchId || entry?.searchId;
   const isStockOrEtf =
     holding.assetType === "stock" ||
     holding.assetType === "etf" ||
+    holding.assetType === "gold" ||
+    holding.assetType === "silver" ||
     entry?.category === "ETF";
 
   if (searchId) {
-    if (isStockOrEtf) {
+    if (isStockOrEtf || isSgb) {
       return `https://groww.in/stocks/${searchId}`;
     } else {
       return `https://groww.in/mutual-funds/${searchId}`;
@@ -93,11 +126,11 @@ export function useGrowwCache() {
   }, []);
 
   const sync = useCallback(
-    async (holdings: { name: string; isin?: string }[]) => {
+    async (holdings: { name: string; isin?: string; assetType?: string }[]) => {
       setIsSyncing(true);
       try {
         const unique = Array.from(
-          new Map(holdings.map((h) => [h.name, h])).values(),
+          new Map(holdings.map((h) => [h.isin || h.name, h])).values(),
         );
         const res = await fetch("/api/groww/sync", {
           method: "POST",

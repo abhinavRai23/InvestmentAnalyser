@@ -38,6 +38,9 @@ yarn-error.log*
 data/reports/*
 !data/reports/.gitkeep
 data/*.xlsx
+data/*.db
+data/*.db-journal
+data/*.log
 data/custom_assets*.json
 !data/custom_assets.example.json
 

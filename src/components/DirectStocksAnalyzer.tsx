@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, ExternalLink, Users, User } from "lucide-react";
-import { useFilteredHoldings } from "@/store/portfolioStore";
+import { RefreshCw, ExternalLink, Users, User, ScrollText } from "lucide-react";
+import { useFilteredHoldings, usePortfolioStore } from "@/store/portfolioStore";
+import { SyncLogsModal } from "./SyncLogsModal";
 import {
   Card,
   CardContent,
@@ -21,7 +22,10 @@ import {
 
 export function DirectStocksAnalyzer() {
   const holdings = useFilteredHoldings();
+  const { syncLivePrices, isSyncing: isSyncingStore } = usePortfolioStore();
   const { cache: growwCache, sync, isSyncing } = useGrowwCache();
+  const [isLocalSyncing, setIsLocalSyncing] = useState(false);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
 
   const directStocks = useMemo(() => {
     return holdings.filter((h) => {
@@ -39,8 +43,29 @@ export function DirectStocksAnalyzer() {
     });
   }, [holdings]);
 
-  const handleSync = () =>
-    sync(directStocks.map((h) => ({ name: h.name, isin: h.isin })));
+  const isAnySyncing = isSyncing || isSyncingStore || isLocalSyncing;
+
+  const handleSync = async () => {
+    setIsLocalSyncing(true);
+    try {
+      await Promise.all([
+        sync(directStocks.map((h) => ({ name: h.name, isin: h.isin, assetType: h.assetType }))),
+        syncLivePrices(),
+      ]);
+    } finally {
+      setIsLocalSyncing(false);
+    }
+  };
+
+  // Auto-fetch live market quotes and 1D returns if missing
+  useEffect(() => {
+    if (directStocks.length > 0 && !isSyncingStore) {
+      const hasMissingLive = directStocks.some((s) => s.oneDayReturnPercentage === undefined);
+      if (hasMissingLive) {
+        syncLivePrices();
+      }
+    }
+  }, [directStocks.length]);
 
   const totalPortfolioValue = useMemo(() => {
     return holdings.reduce((sum, h) => sum + h.currentValue, 0);
@@ -62,12 +87,27 @@ export function DirectStocksAnalyzer() {
     return directStocks.map((stock) => {
       const entry =
         (stock.isin && growwCache[stock.isin]) || growwCache[stock.name];
+      const ret1d =
+        stock.oneDayReturnPercentage ??
+        entry?.return_stats?.[0]?.return1d ??
+        entry?.simple_return?.return1d ??
+        entry?.stats?.return1d;
+      const oneDayPct = typeof ret1d === "number" ? ret1d : null;
+      const oneDayVal =
+        stock.oneDayReturnAbsolute ??
+        (oneDayPct !== null ? (stock.currentValue * oneDayPct) / 100 : null);
+
       const ret1y =
+        (stock as any)._liveReturn1y ??
         entry?.return_stats?.[0]?.return1y ??
         entry?.simple_return?.return1y ??
         entry?.stats?.return1y ??
         entry?.returns?.year1 ??
         entry?.year1Return;
+      const oneYearPct = typeof ret1y === "number" ? ret1y : null;
+      const oneYearVal =
+        oneYearPct !== null ? (stock.currentValue * oneYearPct) / 100 : null;
+
       const ret3y =
         entry?.return_stats?.[0]?.return3y ??
         entry?.simple_return?.return3y ??
@@ -77,11 +117,20 @@ export function DirectStocksAnalyzer() {
 
       return {
         ...stock,
-        _ret1y: typeof ret1y === "number" ? ret1y : null,
+        _ret1d: oneDayPct,
+        _oneDayVal: oneDayVal,
+        _ret1y: oneYearPct,
+        _oneYearVal: oneYearVal,
         _ret3y: typeof ret3y === "number" ? ret3y : null,
       };
     });
   }, [directStocks, growwCache]);
+
+  const totalStock1DChange = useMemo(() => {
+    return enrichedDirectStocks.reduce((sum, s) => sum + (s._oneDayVal ?? 0), 0);
+  }, [enrichedDirectStocks]);
+  const totalStock1DChangePct =
+    totalStockValue > 0 ? (totalStock1DChange / totalStockValue) * 100 : 0;
 
   const groupedStocks = useMemo(() => {
     const groups: Record<string, any[]> = {
@@ -310,26 +359,59 @@ export function DirectStocksAnalyzer() {
       },
     ];
 
-    if (has1yData) {
-      cols.push({
-        header: "1Y Ret",
-        accessorKey: "_ret1y",
-        enableSorting: true,
-        cell: (row) => {
-          const ret = row._ret1y;
-          if (ret === null || ret === undefined)
-            return <span className="text-muted-foreground">-</span>;
-          const isPos = ret >= 0;
-          return (
+    cols.push({
+      header: "1D Return",
+      accessorKey: "_ret1d",
+      enableSorting: true,
+      cell: (row) => {
+        const pct = row._ret1d;
+        const val = row._oneDayVal;
+        if (pct === null || pct === undefined)
+          return <span className="text-muted-foreground">-</span>;
+        const isPos = pct >= 0;
+        return (
+          <div className="flex flex-col">
             <span
-              className={`font-medium whitespace-nowrap ${isPos ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}
+              className={`font-semibold font-mono text-xs ${isPos ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}
             >
-              {ret.toFixed(2)}%
+              {val !== null && val !== undefined ? `${isPos ? "+" : ""}${formatCurrency(val)}` : "-"}
             </span>
-          );
-        },
-      });
-    }
+            <span
+              className={`text-[10px] font-mono ${isPos ? "text-emerald-600/90 dark:text-emerald-300" : "text-rose-600/90 dark:text-rose-300"}`}
+            >
+              {isPos ? "+" : ""}{pct.toFixed(2)}%
+            </span>
+          </div>
+        );
+      },
+    });
+
+    cols.push({
+      header: "1Y Return",
+      accessorKey: "_ret1y",
+      enableSorting: true,
+      cell: (row) => {
+        const pct = row._ret1y;
+        const val = row._oneYearVal;
+        if (pct === null || pct === undefined)
+          return <span className="text-muted-foreground">-</span>;
+        const isPos = pct >= 0;
+        return (
+          <div className="flex flex-col">
+            <span
+              className={`font-semibold font-mono text-xs ${isPos ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}
+            >
+              {val !== null && val !== undefined ? `${isPos ? "+" : ""}${formatCurrency(val)}` : "-"}
+            </span>
+            <span
+              className={`text-[10px] font-mono ${isPos ? "text-emerald-600/90 dark:text-emerald-300" : "text-rose-600/90 dark:text-rose-300"}`}
+            >
+              {isPos ? "+" : ""}{pct.toFixed(2)}%
+            </span>
+          </div>
+        );
+      },
+    });
 
     if (has3yData) {
       cols.push({
@@ -417,19 +499,45 @@ export function DirectStocksAnalyzer() {
                   {totalStockGain >= 0 ? "+" : ""}
                   {totalStockReturnPct.toFixed(2)}%)
                 </span>
+                {totalStock1DChange !== 0 && (
+                  <>
+                    <span>•</span>
+                    <span>1D Return: </span>
+                    <span
+                      className={`font-semibold font-mono text-xs ${totalStock1DChange >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}
+                    >
+                      {totalStock1DChange >= 0 ? "+" : ""}
+                      {formatCurrency(totalStock1DChange)} (
+                      {totalStock1DChange >= 0 ? "+" : ""}
+                      {totalStock1DChangePct.toFixed(2)}%)
+                    </span>
+                  </>
+                )}
               </CardDescription>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSync}
-              disabled={isSyncing}
-            >
-              <RefreshCw
-                className={`h-4 w-4 mr-2 ${isSyncing ? "animate-spin" : ""}`}
-              />
-              {isSyncing ? "Syncing..." : "Sync Groww Intelligence"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsLogsOpen(true)}
+                className="h-9 text-xs gap-1.5"
+                title="View sync diagnostics and logs"
+              >
+                <ScrollText className="h-3.5 w-3.5 text-amber-500" />
+                Sync Logs
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSync}
+                disabled={isAnySyncing}
+              >
+                <RefreshCw
+                  className={`h-4 w-4 mr-2 ${isAnySyncing ? "animate-spin" : ""}`}
+                />
+                {isAnySyncing ? "Syncing Quotes..." : "Sync Live Quotes"}
+              </Button>
+            </div>
           </div>
         </CardHeader>
       </Card>
@@ -449,6 +557,8 @@ export function DirectStocksAnalyzer() {
             totalPortfolioValue > 0
               ? (groupTotal / totalPortfolioValue) * 100
               : 0;
+          const group1DChange = items.reduce((sum, h) => sum + (h._oneDayVal ?? 0), 0);
+          const group1DChangePct = groupTotal > 0 ? (group1DChange / groupTotal) * 100 : 0;
 
           return (
             <Card key={groupName} className="overflow-hidden shadow-sm">
@@ -492,6 +602,22 @@ export function DirectStocksAnalyzer() {
                       {groupReturnPct.toFixed(2)}%
                     </span>
                   </div>
+                  {group1DChange !== 0 && (
+                    <>
+                      <div className="h-6 w-px bg-border my-auto"></div>
+                      <div>
+                        <span className="text-muted-foreground block text-[10px] font-bold uppercase tracking-wider">
+                          1D Move
+                        </span>
+                        <span
+                          className={`font-bold font-mono ${group1DChange >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}
+                        >
+                          {group1DChange >= 0 ? "+" : ""}
+                          {formatCurrency(group1DChange)} ({group1DChange >= 0 ? "+" : ""}{group1DChangePct.toFixed(2)}%)
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
               <CardContent className="p-0">
@@ -500,6 +626,11 @@ export function DirectStocksAnalyzer() {
             </Card>
           );
         })}
+
+      <SyncLogsModal
+        open={isLogsOpen}
+        onOpenChange={setIsLogsOpen}
+      />
     </div>
   );
 }
