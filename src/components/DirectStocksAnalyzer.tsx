@@ -22,7 +22,7 @@ import {
 
 export function DirectStocksAnalyzer() {
   const holdings = useFilteredHoldings();
-  const { syncLivePrices, isSyncing: isSyncingStore } = usePortfolioStore();
+  const { syncLivePrices, isSyncing: isSyncingStore, lastSynced } = usePortfolioStore();
   const { cache: growwCache, sync, isSyncing } = useGrowwCache();
   const [isLocalSyncing, setIsLocalSyncing] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
@@ -57,15 +57,17 @@ export function DirectStocksAnalyzer() {
     }
   };
 
-  // Auto-fetch live market quotes and 1D returns if missing
+  // Auto-fetch live market quotes and 1D returns ONLY if never synced or last sync was > 1 hour ago
   useEffect(() => {
     if (directStocks.length > 0 && !isSyncingStore) {
+      const lastSyncedTime = lastSynced ? new Date(lastSynced).getTime() : 0;
+      const isOlderThanOneHour = !lastSyncedTime || (Date.now() - lastSyncedTime > 60 * 60 * 1000);
       const hasMissingLive = directStocks.some((s) => s.oneDayReturnPercentage === undefined);
-      if (hasMissingLive) {
+      if (isOlderThanOneHour && hasMissingLive) {
         syncLivePrices();
       }
     }
-  }, [directStocks.length]);
+  }, [directStocks.length, lastSynced]);
 
   const totalPortfolioValue = useMemo(() => {
     return holdings.reduce((sum, h) => sum + h.currentValue, 0);

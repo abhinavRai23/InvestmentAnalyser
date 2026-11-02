@@ -65,4 +65,29 @@ describe("engine", () => {
     const abhinavAlloc = alloc.find(a => a.name === "Abhinav");
     expect(abhinavAlloc?.value).toBe(1600);
   });
+
+  it("calculates allocation by person correctly with aggregated owners breakdown", () => {
+    const aggregatedHolding: Holding = {
+      id: "agg-fund-a-ALL",
+      ownerId: "ALL",
+      name: "Fund A",
+      assetType: "mutual_fund",
+      investedValue: 3000,
+      currentValue: 3600,
+      absoluteReturn: 600,
+      returnPercentage: 20,
+      owners: [
+        { ownerId: "Abhinav", ownerName: "Abhinav", investedValue: 1000, currentValue: 1200, percentage: 33.33 },
+        { ownerId: "Mamta", ownerName: "Mamta", investedValue: 2000, currentValue: 2400, percentage: 66.67 },
+      ],
+    };
+
+    const alloc = getAllocationByPerson([aggregatedHolding], [
+      { id: "Abhinav", name: "Abhinav" },
+      { id: "Mamta", name: "Mamta" },
+    ]);
+
+    expect(alloc.find(a => a.name === "Abhinav")?.value).toBe(1200);
+    expect(alloc.find(a => a.name === "Mamta")?.value).toBe(2400);
+  });
 });

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { PortfolioData, AssetType, Holding, OwnerBreakdownItem, Person, CustomAsset } from '@/lib/types';
+import { LiveData } from '@/lib/providers/types';
 import { filterHoldings, calculateMetrics } from '@/lib/engine';
 import { StrategicAssetClass, ProductType } from '@/lib/taxonomy';
 import { v4 as uuidv4 } from 'uuid';
@@ -31,6 +32,8 @@ interface PortfolioState {
 }
 
 const STORAGE_KEY = 'investment_analyser_portfolio';
+const LIVE_PRICES_KEY = 'investment_analyser_live_prices';
+const LAST_SYNCED_KEY = 'investment_analyser_last_synced';
 
 function persistPortfolio(data: PortfolioData | null) {
   if (typeof window === 'undefined') return;
@@ -42,6 +45,16 @@ function persistPortfolio(data: PortfolioData | null) {
     }
   } catch (e) {
     console.warn('Failed to persist portfolio to localStorage', e);
+  }
+}
+
+function persistLivePrices(livePrices: Record<string, LiveData>, lastSynced: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(LIVE_PRICES_KEY, JSON.stringify(livePrices));
+    localStorage.setItem(LAST_SYNCED_KEY, lastSynced);
+  } catch (e) {
+    console.warn('Failed to persist livePrices to localStorage', e);
   }
 }
 
@@ -58,6 +71,26 @@ export function loadStoredPortfolio(): PortfolioData | null {
   return null;
 }
 
+export function loadStoredLivePrices(): Record<string, LiveData> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(LIVE_PRICES_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.warn('Failed to load livePrices from localStorage', e);
+  }
+  return {};
+}
+
+export function loadStoredLastSynced(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(LAST_SYNCED_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   data: null,
   filters: {
@@ -65,16 +98,25 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     ownerId: 'ALL',
     assetType: 'ALL',
   },
-  livePrices: {},
+  livePrices: loadStoredLivePrices(),
   isSyncing: false,
-  lastSynced: null,
+  lastSynced: loadStoredLastSynced(),
   setData: (data) => {
     set({ data });
     persistPortfolio(data);
   },
   clearPortfolio: () => {
-    set({ data: null, filters: { selectedOwnerIds: ['ALL'], ownerId: 'ALL', assetType: 'ALL' } });
+    set({
+      data: null,
+      livePrices: {},
+      lastSynced: null,
+      filters: { selectedOwnerIds: ['ALL'], ownerId: 'ALL', assetType: 'ALL' },
+    });
     persistPortfolio(null);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(LIVE_PRICES_KEY);
+      localStorage.removeItem(LAST_SYNCED_KEY);
+    }
   },
   exportPortfolioBackup: () => {
     const current = get().data;
@@ -361,10 +403,13 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
 
       if (res.ok) {
         const { enrichedData } = await res.json();
-        set((state) => ({ 
-          livePrices: { ...state.livePrices, ...enrichedData },
-          lastSynced: new Date().toISOString()
-        }));
+        const now = new Date().toISOString();
+        const mergedPrices = { ...get().livePrices, ...enrichedData };
+        set({ 
+          livePrices: mergedPrices,
+          lastSynced: now
+        });
+        persistLivePrices(mergedPrices, now);
       }
     } catch (e) {
       console.error("Failed to sync live prices", e);
@@ -547,8 +592,12 @@ function aggregateHoldings(holdings: Holding[], people: Person[] = []): Holding[
     const totalCurrent    = group.reduce((s, h) => s + h.currentValue, 0);
     const totalAbsolute   = group.reduce((s, h) => s + h.absoluteReturn, 0);
     const totalQty        = group.reduce((s, h) => s + (h.quantity ?? 0), 0);
+    const totalOneDay     = group.reduce((s, h) => s + (h.oneDayReturnAbsolute ?? 0), 0);
+    const hasAnyOneDay    = group.some(h => h.oneDayReturnAbsolute !== undefined || h.oneDayReturnPercentage !== undefined);
     const returnPct       = totalInvested > 0 ? (totalAbsolute / totalInvested) * 100 : 0;
+    const oneDayPct       = totalCurrent > 0 && hasAnyOneDay ? (totalOneDay / totalCurrent) * 100 : undefined;
     const xirr            = group.find(h => h.xirr && h.xirr !== 0)?.xirr;
+    const liveReturn1y    = (group.find(h => (h as any)._liveReturn1y !== undefined) as any)?._liveReturn1y;
 
     const distinctOwners  = new Set(group.map(h => h.ownerId));
     const ownerId         = distinctOwners.size === 1 ? base.ownerId : 'ALL';
@@ -593,9 +642,12 @@ function aggregateHoldings(holdings: Holding[], people: Person[] = []): Holding[
       absoluteReturn:  totalAbsolute,
       returnPercentage: returnPct,
       quantity: totalQty > 0 ? totalQty : undefined,
+      oneDayReturnAbsolute: hasAnyOneDay ? totalOneDay : undefined,
+      oneDayReturnPercentage: oneDayPct,
+      _liveReturn1y: liveReturn1y,
       xirr,
       owners: ownersBreakdown,
-    });
+    } as any);
   }
 
   return result;
@@ -634,11 +686,11 @@ export const useFilteredHoldings = () => {
     assetTypes
   });
 
-  // ── Holding Aggregation ───────────────────────────────────────────────────────
-  // Merge duplicate holdings into one row per security.
-  const deduplicated = aggregateHoldings(filtered, data.people);
-
-  return deduplicated.map(h => {
+  // ── 1. Enrich Individual Holdings First with Live Prices ─────────────────────
+  // Applying live prices BEFORE aggregation ensures:
+  // - Holding IDs (h.id) match livePrices directly (aggregated 'agg-...' IDs never matched!).
+  // - Each person's holding gets its live marketPrice, currentValue, and 1D return.
+  const enrichedFiltered = filtered.map(h => {
     const live = livePrices[h.id] || (h.isin ? livePrices[h.isin] : undefined) || livePrices[h.name];
     if (live) {
       const qty = h.quantity ?? (h.marketPrice ? h.currentValue / h.marketPrice : 0);
@@ -661,6 +713,11 @@ export const useFilteredHoldings = () => {
     }
     return h;
   });
+
+  // ── 2. Holding Aggregation ───────────────────────────────────────────────────
+  // Merge duplicate holdings across members on already-enriched live data.
+  // This guarantees that the sum of individual members matches the entire portfolio total perfectly.
+  return aggregateHoldings(enrichedFiltered, data.people);
 };
 
 export const usePortfolioMetrics = () => {

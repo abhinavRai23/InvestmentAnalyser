@@ -36,6 +36,7 @@ export function Dashboard() {
     isSyncing,
     syncLivePrices,
     livePrices,
+    lastSynced,
     exportPortfolioBackup,
     clearPortfolio
   } = usePortfolioStore();
@@ -56,7 +57,7 @@ export function Dashboard() {
     if (!data?.holdings || isSyncingCombined || isSyncing || isSyncingGroww) return;
     setIsSyncingCombined(true);
     try {
-      const holdingsToSync = data.holdings.map(h => ({ name: h.name, isin: h.isin }));
+      const holdingsToSync = data.holdings.map(h => ({ name: h.name, isin: h.isin, assetType: h.assetType }));
       // Execute both API calls in parallel:
       // 1. Live stock prices & MF NAVs (/api/enrich via syncLivePrices)
       // 2. Groww fund intelligence & scheme metadata (/api/groww/sync via syncGroww)
@@ -98,12 +99,15 @@ export function Dashboard() {
     }
   }, [searchParams, activeTab, filters.selectedOwnerIds, filters.assetType]);
 
-  // Auto-sync live prices and 1D returns in background on initial load if not yet populated
+  // Auto-sync live prices and 1D returns ONLY if never synced or last sync was > 1 hour ago
   useEffect(() => {
-    if (data?.holdings && data.holdings.length > 0 && !isSyncing && Object.keys(livePrices).length === 0) {
+    if (!data?.holdings || data.holdings.length === 0 || isSyncing) return;
+    const lastSyncedTime = lastSynced ? new Date(lastSynced).getTime() : 0;
+    const isOlderThanOneHour = !lastSyncedTime || (Date.now() - lastSyncedTime > 60 * 60 * 1000);
+    if (isOlderThanOneHour) {
       syncLivePrices();
     }
-  }, [data?.holdings?.length]);
+  }, [data?.holdings?.length, lastSynced]);
 
   const handleTabChange = (tab: string) => {
     setActiveTabState(tab);
