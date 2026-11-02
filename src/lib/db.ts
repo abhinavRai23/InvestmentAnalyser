@@ -4,17 +4,20 @@ import path from 'path';
 
 let dbInstance: DatabaseSync | null = null;
 
-const DB_PATH = path.join(process.cwd(), 'data', 'investments.db');
-
 export function getDb(): DatabaseSync {
   if (dbInstance) return dbInstance;
 
-  const dataDir = path.join(process.cwd(), 'data');
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+  const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+  const dbPath = isTest ? ':memory:' : path.join(process.cwd(), 'data', 'investments.db');
+
+  if (!isTest) {
+    const dataDir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
   }
 
-  dbInstance = new DatabaseSync(DB_PATH);
+  dbInstance = new DatabaseSync(dbPath);
 
   // Initialize schema
   dbInstance.exec(`

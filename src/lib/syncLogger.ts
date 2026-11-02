@@ -61,8 +61,9 @@ export function logSync(entry: Omit<SyncLogEntry, 'timestamp'>) {
       entry.details ? JSON.stringify(entry.details) : null
     );
 
-    // Also write to plain text log file if WARN or ERROR
-    if (entry.level === 'WARN' || entry.level === 'ERROR') {
+    // Also write to plain text log file if WARN or ERROR (skip during test runs)
+    const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+    if ((entry.level === 'WARN' || entry.level === 'ERROR') && !isTest) {
       const line = `[${timestamp}] [${entry.level}] [${entry.source}] ${entry.assetName ? `[${entry.assetName}] ` : ''}${entry.message}${entry.details ? ' ' + JSON.stringify(entry.details) : ''}\n`;
       fs.appendFileSync(LOG_FILE, line, 'utf8');
     }
