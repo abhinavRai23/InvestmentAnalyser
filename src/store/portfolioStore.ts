@@ -694,6 +694,19 @@ export const useFilteredHoldings = () => {
     const live = livePrices[h.id] || (h.isin ? livePrices[h.isin] : undefined) || livePrices[h.name];
     if (live) {
       const qty = h.quantity ?? (h.marketPrice ? h.currentValue / h.marketPrice : 0);
+
+      // NAV Sanity Guard: Reject extreme live price deviations caused by fuzzy scheme mismatch
+      if (qty > 0 && h.currentValue > 0) {
+        const basePrice = h.marketPrice || (h.currentValue / qty);
+        if (basePrice > 0) {
+          const ratio = live.price / basePrice;
+          if (ratio > 2.5 || ratio < 0.4) {
+            console.warn(`[useFilteredHoldings] Live price mismatch rejected for "${h.name}". Base: ${basePrice.toFixed(2)}, Live: ${live.price}. Retaining statement value.`);
+            return h;
+          }
+        }
+      }
+
       const newCurrentValue = live.price * qty;
       const oneDayReturnAbsolute = live.change !== undefined
         ? live.change * qty

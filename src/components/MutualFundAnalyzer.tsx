@@ -48,10 +48,21 @@ export function MutualFundAnalyzer() {
       const mainCat = entry?.category || h.category;
       const categoryName = subCat || mainCat || "Uncategorized";
 
-      const growwNav = typeof entry?.nav === 'number' && entry.nav > 0 ? entry.nav : undefined;
+      const rawGrowwNav = typeof entry?.nav === 'number' && entry.nav > 0 ? entry.nav : undefined;
       const units = h.quantity ?? (h.marketPrice ? h.currentValue / h.marketPrice : 0);
-
       const statementValue = h.currentValue;
+
+      // NAV Sanity Guard: Prevent scheme mismatches where growwNav deviates drastically from statement NAV
+      let growwNav = rawGrowwNav;
+      if (rawGrowwNav && units > 0 && statementValue > 0) {
+        const statementNav = statementValue / units;
+        const ratio = rawGrowwNav / statementNav;
+        if (ratio > 2.5 || ratio < 0.4) {
+          console.warn(`[MutualFundAnalyzer] Scheme mismatch detected for "${h.name}". Statement NAV: ${statementNav.toFixed(2)}, Groww NAV: ${rawGrowwNav}. Falling back to statement value.`);
+          growwNav = undefined;
+        }
+      }
+
       const activeCurrentValue = growwNav && units > 0 ? units * growwNav : statementValue;
       const activeAbsReturn = activeCurrentValue - h.investedValue;
       const activeReturnPct = h.investedValue > 0 ? (activeAbsReturn / h.investedValue) * 100 : 0;

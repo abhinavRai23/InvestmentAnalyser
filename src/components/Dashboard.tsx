@@ -75,29 +75,34 @@ export function Dashboard() {
   const isSyncingAny = isSyncing || isSyncingGroww || isSyncingCombined;
 
 
+  // Sync URL search params to component state and store ONLY when searchParams changes
   useEffect(() => {
-    const urlTab = searchParams.get("tab");
-    if (urlTab && urlTab !== activeTab) {
-      setActiveTabState(urlTab);
-    }
+    // 1. Sync Tab from URL
+    const urlTab = searchParams.get("tab") || "overview";
+    setActiveTabState((prev) => (prev !== urlTab ? urlTab : prev));
 
+    // 2. Sync Owner from URL (if absent in URL, default to Entire Family ["ALL"])
     const ownerParam = searchParams.get("owner") || searchParams.get("ownerId") || searchParams.get("person");
-    if (ownerParam) {
-      const ids = ownerParam.split(",").map((s) => decodeURIComponent(s.trim())).filter(Boolean);
-      if (ids.length > 0) {
-        const currentIds = filters.selectedOwnerIds || [];
-        const isSame = currentIds.length === ids.length && currentIds.every((id, idx) => id === ids[idx]);
-        if (!isSame) {
-          setFilter("selectedOwnerIds", ids);
-        }
-      }
+    const targetOwnerIds = ownerParam
+      ? ownerParam.split(",").map((s) => decodeURIComponent(s.trim())).filter(Boolean)
+      : ["ALL"];
+
+    const currentOwnerIds = usePortfolioStore.getState().filters.selectedOwnerIds || ["ALL"];
+    const isOwnerSame =
+      currentOwnerIds.length === targetOwnerIds.length &&
+      currentOwnerIds.every((id, idx) => id === targetOwnerIds[idx]);
+
+    if (!isOwnerSame) {
+      setFilter("selectedOwnerIds", targetOwnerIds);
     }
 
-    const assetParam = searchParams.get("assetType");
-    if (assetParam && assetParam !== filters.assetType) {
+    // 3. Sync Asset Type from URL (if absent in URL, default to "ALL")
+    const assetParam = searchParams.get("assetType") || "ALL";
+    const currentAssetType = usePortfolioStore.getState().filters.assetType || "ALL";
+    if (assetParam !== currentAssetType) {
       setFilter("assetType", assetParam);
     }
-  }, [searchParams, activeTab, filters.selectedOwnerIds, filters.assetType]);
+  }, [searchParams, setFilter]);
 
   // Auto-sync live prices and 1D returns ONLY if never synced or last sync was > 1 hour ago
   useEffect(() => {

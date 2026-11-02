@@ -88,6 +88,7 @@ export function GlobalFilters({
       {/* Quick 1-Click Family Member Pills */}
       <div className="hidden lg:flex items-center space-x-1.5 bg-muted/40 p-1 rounded-lg border border-border/60">
         <button
+          type="button"
           onClick={selectAll}
           className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${isAllSelected
               ? "bg-indigo-600 text-white shadow-xs"
@@ -101,6 +102,7 @@ export function GlobalFilters({
           const firstName = p.name.split(" ")[0];
           return (
             <button
+              type="button"
               key={p.id}
               onClick={() => selectSinglePerson(p.id)}
               className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${isSelected

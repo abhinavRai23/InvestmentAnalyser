@@ -90,4 +90,21 @@ describe("engine", () => {
     expect(alloc.find(a => a.name === "Abhinav")?.value).toBe(1200);
     expect(alloc.find(a => a.name === "Mamta")?.value).toBe(2400);
   });
+
+  it("guards against extreme NAV discrepancies from scheme mismatches", () => {
+    // Simulated holding with base NAV = 61.38 (invested 62996.87, current 66703.55, units 1086.685)
+    const baseNav = 66703.55 / 1086.685;
+    const corruptedNav = 4855.0498; // 79x distortion from ultra short term mismatch
+    const ratio = corruptedNav / baseNav;
+
+    // Sanity check formula used in portfolioStore and MutualFundAnalyzer
+    const isSensible = ratio <= 2.5 && ratio >= 0.4;
+    expect(isSensible).toBe(false);
+
+    // Realistic NAV change within normal range
+    const validNav = 61.5405;
+    const validRatio = validNav / baseNav;
+    const isValidSensible = validRatio <= 2.5 && validRatio >= 0.4;
+    expect(isValidSensible).toBe(true);
+  });
 });

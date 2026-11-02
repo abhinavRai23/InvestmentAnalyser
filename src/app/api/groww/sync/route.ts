@@ -3,6 +3,15 @@ import { getDb } from '@/lib/db';
 import { logSync } from '@/lib/syncLogger';
 import { fetchSgbLivePrice } from '@/lib/providers/sgb';
 
+export const KNOWN_MF_SEARCH_ID_MAP: Record<string, string> = {
+  "Nippon India Short Term Fund Direct Growth": "nippon-india-short-term-fund-direct-growth",
+  "Aditya Birla Sun Life Short Term Direct Fund Direct Growth": "aditya-birla-sun-life-short-term-direct-fund-direct-growth",
+  "JM Large Cap Fund Direct Plan Growth": "jm-equity-direct-growth",
+  "Nippon India Index Fund BSE Sensex Plan Direct Growth": "nippon-india-index-fund-bse-sensex-plan-direct-growth",
+};
+
+const MODIFIER_WORDS = ['ultra', 'mid', 'small', 'next', 'overnight', 'liquid', 'arbitrage', 'hybrid', 'dynamic'];
+
 /** Groww mutual-fund / ETF scheme search + details fetch.
  *  Only call this for mutual_fund and ETF asset types — NOT for raw stocks or SGBs. */
 async function fetchGrowwDetails(holdingName: string, isin?: string): Promise<{ data: any; debugInfo: any } | null> {
@@ -23,39 +32,63 @@ async function fetchGrowwDetails(holdingName: string, isin?: string): Promise<{ 
   try {
     let candidateList: any[] = [];
 
+    // Direct search ID override for known ambiguous schemes
+    if (KNOWN_MF_SEARCH_ID_MAP[holdingName]) {
+      candidateList.push({
+        search_id: KNOWN_MF_SEARCH_ID_MAP[holdingName],
+        entity_type: isEtf ? 'ETF' : 'Scheme',
+        title: holdingName,
+      });
+      debug.searchAttempts.push({ attempt: 0, type: 'KnownOverride', searchId: KNOWN_MF_SEARCH_ID_MAP[holdingName] });
+    }
+
+    const scoreCandidate = (candidate: any) => {
+      const targetText = nameLower;
+      const candText = `${candidate.title || ''} ${candidate.search_id || ''}`.toLowerCase();
+      let score = 0;
+
+      if (candidate.title && candidate.title.toLowerCase() === targetText) {
+        score += 100;
+      }
+
+      // Modifier words penalty/bonus (prevents "Short Term" from matching "Ultra Short Term")
+      for (const mod of MODIFIER_WORDS) {
+        const inCand = candText.includes(mod);
+        const inTarget = targetText.includes(mod);
+        if (inCand && !inTarget) {
+          score -= 50; // Candidate has a modifier not present in target scheme name
+        } else if (inCand && inTarget) {
+          score += 20; // Both share the specific modifier
+        }
+      }
+
+      // Word overlap bonus
+      const targetWords = targetText.split(/\s+/).filter(w => !['fund', 'direct', 'growth', 'plan'].includes(w) && w.length > 2);
+      for (const w of targetWords) {
+        if (candText.includes(w)) score += 5;
+      }
+
+      if (isMfScheme && candidate.entity_type === 'Scheme') score += 10;
+      if (isEtf && candidate.entity_type === 'ETF') score += 10;
+
+      return score;
+    };
+
     const getCandidates = (results: any[]) => {
       if (!results || results.length === 0) return [];
-      const list: any[] = [];
-      const isFof = nameLower.includes('fund of fund') || nameLower.includes('fof');
+      
+      const filtered = results.filter((item: any) => {
+        if (isEtf) return item.entity_type === 'ETF';
+        if (isMfScheme) return item.entity_type === 'Scheme';
+        return item.entity_type === 'Scheme' || item.entity_type === 'ETF';
+      });
 
-      if (isFof) {
-        results.filter((item: any) =>
-          item.entity_type === 'Scheme' &&
-          (item.search_id?.includes('fof') || item.search_id?.includes('fund-of-fund') || item.title?.toLowerCase().includes('fund'))
-        ).forEach(item => list.push(item));
-      }
-
-      results.filter((item: any) => item.title?.toLowerCase() === holdingName.toLowerCase())
-        .forEach(item => { if (!list.includes(item)) list.push(item); });
-
-      if (isMfScheme) {
-        results.filter((item: any) => item.entity_type === 'Scheme')
-          .forEach(item => { if (!list.includes(item)) list.push(item); });
-      }
-
-      if (isEtf) {
-        results.filter((item: any) => item.entity_type === 'ETF')
-          .forEach(item => { if (!list.includes(item)) list.push(item); });
-      }
-
-      results.filter((item: any) => item.entity_type === 'Scheme' || item.entity_type === 'ETF')
-        .forEach(item => { if (!list.includes(item)) list.push(item); });
-
-      return list;
+      const pool = filtered.length > 0 ? filtered : results;
+      return [...pool].sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
     };
 
     // ATTEMPT 1: Search by ISIN
-    if (isin) {
+    if (isin && candidateList.length === 0) {
       const isinUrl = `https://groww.in/v1/api/search/v3/query/global/st_p_query?page=0&query=${encodeURIComponent(isin)}&size=5&web=true`;
       debug.searchAttempts.push({ attempt: 1, type: 'ISIN', query: isin, url: isinUrl });
 
