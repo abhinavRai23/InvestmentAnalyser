@@ -4,6 +4,11 @@ export interface LiveData {
   change?: number;
   changePct?: number;
   return1y?: number;
+  fiftyTwoWeekHigh?: number;
+  fiftyTwoWeekLow?: number;
+  fiftyTwoWeekAvg?: number;
+  twoHundredDayAverage?: number;
+  fiftyDayAverage?: number;
 }
 
 export interface MarketDataProvider {

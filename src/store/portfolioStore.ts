@@ -3,6 +3,7 @@ import { PortfolioData, AssetType, Holding, OwnerBreakdownItem, Person, CustomAs
 import { LiveData } from '@/lib/providers/types';
 import { filterHoldings, calculateMetrics } from '@/lib/engine';
 import { StrategicAssetClass, ProductType } from '@/lib/taxonomy';
+import { StockTarget, normalizeStockKey } from '@/lib/stockSignals';
 import { v4 as uuidv4 } from 'uuid';
 
 interface PortfolioState {
@@ -12,9 +13,13 @@ interface PortfolioState {
     ownerId: string | 'ALL';
     assetType: AssetType | 'ALL';
   };
-  livePrices: Record<string, { price: number; date: string; change?: number; changePct?: number; return1y?: number }>;
+  livePrices: Record<string, LiveData>;
   isSyncing: boolean;
   lastSynced: string | null;
+  stockTargets: Record<string, StockTarget>;
+  loadStockTargets: () => Promise<void>;
+  saveStockTarget: (target: StockTarget) => Promise<void>;
+  deleteStockTarget: (key: string) => Promise<void>;
   setData: (data: PortfolioData) => void;
   clearPortfolio: () => void;
   exportPortfolioBackup: () => void;
@@ -34,6 +39,27 @@ interface PortfolioState {
 const STORAGE_KEY = 'investment_analyser_portfolio';
 const LIVE_PRICES_KEY = 'investment_analyser_live_prices';
 const LAST_SYNCED_KEY = 'investment_analyser_last_synced';
+const STOCK_TARGETS_KEY = 'investment_analyser_stock_targets';
+
+function loadStoredStockTargets(): Record<string, StockTarget> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(STOCK_TARGETS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.warn('Failed to load stock targets from localStorage', e);
+  }
+  return {};
+}
+
+function persistStockTargets(targets: Record<string, StockTarget>) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STOCK_TARGETS_KEY, JSON.stringify(targets));
+  } catch (e) {
+    console.warn('Failed to persist stock targets to localStorage', e);
+  }
+}
 
 function persistPortfolio(data: PortfolioData | null) {
   if (typeof window === 'undefined') return;
@@ -118,6 +144,54 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   livePrices: loadStoredLivePrices(),
   isSyncing: false,
   lastSynced: loadStoredLastSynced(),
+  stockTargets: loadStoredStockTargets(),
+  loadStockTargets: async () => {
+    try {
+      const res = await fetch('/api/stock-targets');
+      if (res.ok) {
+        const { targets } = await res.json();
+        const merged = { ...loadStoredStockTargets(), ...(targets || {}) };
+        set({ stockTargets: merged });
+        persistStockTargets(merged);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch stock targets from API', e);
+    }
+  },
+  saveStockTarget: async (target: StockTarget) => {
+    const key = normalizeStockKey(target.key);
+    const updated = {
+      ...get().stockTargets,
+      [key]: { ...target, key, updatedAt: new Date().toISOString() },
+    };
+    set({ stockTargets: updated });
+    persistStockTargets(updated);
+
+    try {
+      await fetch('/api/stock-targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(target),
+      });
+    } catch (e) {
+      console.warn('Failed to persist stock target to API', e);
+    }
+  },
+  deleteStockTarget: async (key: string) => {
+    const canonicalKey = normalizeStockKey(key);
+    const updated = { ...get().stockTargets };
+    delete updated[canonicalKey];
+    set({ stockTargets: updated });
+    persistStockTargets(updated);
+
+    try {
+      await fetch(`/api/stock-targets?key=${encodeURIComponent(canonicalKey)}`, {
+        method: 'DELETE',
+      });
+    } catch (e) {
+      console.warn('Failed to delete stock target from API', e);
+    }
+  },
   setData: (data) => {
     set({ data });
     persistPortfolio(data);
@@ -615,6 +689,10 @@ function aggregateHoldings(holdings: Holding[], people: Person[] = []): Holding[
     const oneDayPct       = totalCurrent > 0 && hasAnyOneDay ? (totalOneDay / totalCurrent) * 100 : undefined;
     const xirr            = group.find(h => h.xirr && h.xirr !== 0)?.xirr;
     const liveReturn1y    = (group.find(h => (h as any)._liveReturn1y !== undefined) as any)?._liveReturn1y;
+    const live52High      = (group.find(h => (h as any)._fiftyTwoWeekHigh !== undefined) as any)?._fiftyTwoWeekHigh;
+    const live52Low       = (group.find(h => (h as any)._fiftyTwoWeekLow !== undefined) as any)?._fiftyTwoWeekLow;
+    const live52Avg       = (group.find(h => (h as any)._fiftyTwoWeekAvg !== undefined) as any)?._fiftyTwoWeekAvg;
+    const live200Dma      = (group.find(h => (h as any)._twoHundredDayAverage !== undefined) as any)?._twoHundredDayAverage;
 
     const distinctOwners  = new Set(group.map(h => h.ownerId));
     const ownerId         = distinctOwners.size === 1 ? base.ownerId : 'ALL';
@@ -662,6 +740,10 @@ function aggregateHoldings(holdings: Holding[], people: Person[] = []): Holding[
       oneDayReturnAbsolute: hasAnyOneDay ? totalOneDay : undefined,
       oneDayReturnPercentage: oneDayPct,
       _liveReturn1y: liveReturn1y,
+      _fiftyTwoWeekHigh: live52High,
+      _fiftyTwoWeekLow: live52Low,
+      _fiftyTwoWeekAvg: live52Avg,
+      _twoHundredDayAverage: live200Dma,
       xirr,
       owners: ownersBreakdown,
     } as any);
@@ -744,7 +826,17 @@ export const useFilteredHoldings = () => {
         oneDayReturnAbsolute,
         oneDayReturnPercentage,
         _liveReturn1y: ret1y,
-      } as Holding & { _liveReturn1y?: number };
+        _fiftyTwoWeekHigh: live.fiftyTwoWeekHigh,
+        _fiftyTwoWeekLow: live.fiftyTwoWeekLow,
+        _fiftyTwoWeekAvg: live.fiftyTwoWeekAvg,
+        _twoHundredDayAverage: live.twoHundredDayAverage,
+      } as Holding & { 
+        _liveReturn1y?: number;
+        _fiftyTwoWeekHigh?: number;
+        _fiftyTwoWeekLow?: number;
+        _fiftyTwoWeekAvg?: number;
+        _twoHundredDayAverage?: number;
+      };
     }
     return h;
   });

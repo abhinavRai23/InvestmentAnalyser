@@ -63,6 +63,22 @@ export function getDb(): DatabaseSync {
       groww_search_id TEXT NOT NULL,
       redemption_date TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS stock_targets (
+      key TEXT PRIMARY KEY,
+      symbol TEXT,
+      name TEXT,
+      isin TEXT,
+      target_price REAL,
+      stop_loss_price REAL,
+      notes TEXT,
+      tag TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_stock_targets_symbol ON stock_targets(symbol);
+    CREATE INDEX IF NOT EXISTS idx_stock_targets_isin ON stock_targets(isin);
   `);
 
   // Seed verified SGB mappings

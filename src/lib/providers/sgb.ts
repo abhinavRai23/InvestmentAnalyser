@@ -69,10 +69,17 @@ export async function fetchSgbLivePrice(isin?: string, name?: string): Promise<L
           const changePct = Number.isFinite(d.dayChangePerc) ? d.dayChangePerc : 0;
           
           let return1y: number | undefined = undefined;
+          let fiftyTwoWeekHigh: number | undefined = undefined;
+          let fiftyTwoWeekLow: number | undefined = undefined;
+          let fiftyTwoWeekAvg: number | undefined = undefined;
+
           try {
             const gold = await getGoldSpotRatePerGram();
-            if (gold && typeof gold.return1y === "number") {
-              return1y = gold.return1y;
+            if (gold) {
+              if (typeof gold.return1y === "number") return1y = gold.return1y;
+              if (typeof gold.fiftyTwoWeekHigh === "number") fiftyTwoWeekHigh = gold.fiftyTwoWeekHigh;
+              if (typeof gold.fiftyTwoWeekLow === "number") fiftyTwoWeekLow = gold.fiftyTwoWeekLow;
+              if (typeof gold.fiftyTwoWeekAvg === "number") fiftyTwoWeekAvg = gold.fiftyTwoWeekAvg;
             }
           } catch {
             // Ignore gold benchmark error
@@ -84,6 +91,9 @@ export async function fetchSgbLivePrice(isin?: string, name?: string): Promise<L
             change,
             changePct,
             return1y,
+            fiftyTwoWeekHigh,
+            fiftyTwoWeekLow,
+            fiftyTwoWeekAvg,
           };
         }
       }

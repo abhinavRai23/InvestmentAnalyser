@@ -1,8 +1,30 @@
 import { useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, ExternalLink, Users, User, ScrollText } from "lucide-react";
+import { 
+  RefreshCw, 
+  ExternalLink, 
+  Users, 
+  User, 
+  ScrollText,
+  Target,
+  ShieldAlert,
+  AlertTriangle,
+  TrendingUp,
+  TrendingDown,
+  Info,
+  SlidersHorizontal,
+  Sparkles,
+  Tag as TagIcon
+} from "lucide-react";
 import { useFilteredHoldings, usePortfolioStore } from "@/store/portfolioStore";
 import { SyncLogsModal } from "./SyncLogsModal";
+import { StockStrategyModal } from "./StockStrategyModal";
+import { 
+  StockSignalType, 
+  findMatchingStockTarget, 
+  evaluateStockSignal 
+} from "@/lib/stockSignals";
+import { resolveYahooTicker } from "@/lib/tickerMapping";
 import {
   Card,
   CardContent,
@@ -22,10 +44,26 @@ import {
 
 export function DirectStocksAnalyzer() {
   const holdings = useFilteredHoldings();
-  const { syncLivePrices, isSyncing: isSyncingStore, lastSynced } = usePortfolioStore();
+  const { 
+    syncLivePrices, 
+    isSyncing: isSyncingStore, 
+    lastSynced,
+    livePrices,
+    stockTargets,
+    loadStockTargets,
+    saveStockTarget,
+    deleteStockTarget
+  } = usePortfolioStore();
   const { cache: growwCache, sync, isSyncing } = useGrowwCache();
   const [isLocalSyncing, setIsLocalSyncing] = useState(false);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [selectedStockForStrategy, setSelectedStockForStrategy] = useState<any | null>(null);
+  const [isStrategyModalOpen, setIsStrategyModalOpen] = useState(false);
+  const [signalFilter, setSignalFilter] = useState<'ALL' | StockSignalType | 'WITH_PLAN'>('ALL');
+
+  useEffect(() => {
+    loadStockTargets();
+  }, [loadStockTargets]);
 
   const directStocks = useMemo(() => {
     return holdings.filter((h) => {
@@ -121,6 +159,48 @@ export function DirectStocksAnalyzer() {
         entry?.returns?.year3 ??
         entry?.year3Return;
 
+      const live =
+        (stock.id && livePrices[stock.id]) ||
+        (stock.isin && livePrices[stock.isin]) ||
+        livePrices[stock.name];
+
+      const yahooSymbol = resolveYahooTicker(stock.name);
+      const target = findMatchingStockTarget(stock, yahooSymbol, stockTargets);
+
+      const currentPrice =
+        stock.marketPrice && stock.marketPrice > 0
+          ? stock.marketPrice
+          : stock.quantity && stock.quantity > 0
+          ? stock.currentValue / stock.quantity
+          : stock.currentValue;
+
+      const signal = evaluateStockSignal(
+        currentPrice,
+        live || {
+          price: currentPrice,
+          date: new Date().toISOString(),
+          fiftyTwoWeekHigh: (stock as any)._fiftyTwoWeekHigh,
+          fiftyTwoWeekLow: (stock as any)._fiftyTwoWeekLow,
+          fiftyTwoWeekAvg: (stock as any)._fiftyTwoWeekAvg,
+        },
+        target
+      );
+
+      const signalScore =
+        signal.primarySignal === "TARGET_REACHED"
+          ? 100
+          : signal.primarySignal === "STOP_LOSS_HIT"
+          ? 90
+          : signal.primarySignal === "NEAR_52W_LOW"
+          ? 80
+          : signal.primarySignal === "NEAR_TARGET"
+          ? 70
+          : signal.primarySignal === "ABOVE_52W_AVG"
+          ? 60
+          : signal.primarySignal === "BELOW_52W_AVG"
+          ? 40
+          : 20;
+
       return {
         ...stock,
         _ret1d: oneDayPct,
@@ -128,9 +208,47 @@ export function DirectStocksAnalyzer() {
         _ret1y: oneYearPct,
         _oneYearVal: oneYearVal,
         _ret3y: typeof ret3y === "number" ? ret3y : null,
+        _signal: signal,
+        _signalScore: signalScore,
+        _target: target,
+        _currentPrice: currentPrice,
       };
     });
-  }, [directStocks, growwCache]);
+  }, [directStocks, growwCache, livePrices, stockTargets]);
+
+  const signalCounts = useMemo(() => {
+    let targetMet = 0;
+    let stopLoss = 0;
+    let nearLow = 0;
+    let aboveAvg = 0;
+    let belowAvg = 0;
+    let withPlan = 0;
+
+    for (const s of enrichedDirectStocks) {
+      if (s._signal.hasCustomPlan) withPlan++;
+      if (s._signal.primarySignal === "TARGET_REACHED") targetMet++;
+      else if (s._signal.primarySignal === "STOP_LOSS_HIT") stopLoss++;
+      else if (s._signal.primarySignal === "NEAR_52W_LOW") nearLow++;
+      else if (s._signal.primarySignal === "ABOVE_52W_AVG") aboveAvg++;
+      else if (s._signal.primarySignal === "BELOW_52W_AVG") belowAvg++;
+    }
+
+    return {
+      total: enrichedDirectStocks.length,
+      targetMet,
+      stopLoss,
+      nearLow,
+      aboveAvg,
+      belowAvg,
+      withPlan,
+    };
+  }, [enrichedDirectStocks]);
+
+  const displayedStocks = useMemo(() => {
+    if (signalFilter === "ALL") return enrichedDirectStocks;
+    if (signalFilter === "WITH_PLAN") return enrichedDirectStocks.filter((s) => s._signal.hasCustomPlan);
+    return enrichedDirectStocks.filter((s) => s._signal.primarySignal === signalFilter);
+  }, [enrichedDirectStocks, signalFilter]);
 
   const totalStock1DChange = useMemo(() => {
     return enrichedDirectStocks.reduce((sum, s) => sum + (s._oneDayVal ?? 0), 0);
@@ -147,7 +265,7 @@ export function DirectStocksAnalyzer() {
       "Sovereign Gold Bonds (SGB)": [],
     };
 
-    for (const stock of enrichedDirectStocks) {
+    for (const stock of displayedStocks) {
       const nameLower = stock.name.toLowerCase();
       const isSgb =
         stock.assetType === "sgb" ||
@@ -200,7 +318,7 @@ export function DirectStocksAnalyzer() {
     });
 
     return groups;
-  }, [enrichedDirectStocks]);
+  }, [displayedStocks, growwCache]);
 
   const columns = useMemo(() => {
     const has1yData = enrichedDirectStocks.some(
@@ -268,6 +386,104 @@ export function DirectStocksAnalyzer() {
                   </Badge>
                 )}
               </div>
+            </div>
+          );
+        },
+      },
+      {
+        header: "Strategy & Signal",
+        accessorKey: "_signalScore",
+        enableSorting: true,
+        cell: (row) => {
+          const signal = row._signal;
+          const target = row._target;
+
+          let Icon = Info;
+          if (signal?.iconName === "target") Icon = Target;
+          else if (signal?.iconName === "stop-circle") Icon = ShieldAlert;
+          else if (signal?.iconName === "alert-triangle") Icon = AlertTriangle;
+          else if (signal?.iconName === "trending-up") Icon = TrendingUp;
+          else if (signal?.iconName === "trending-down") Icon = TrendingDown;
+
+          return (
+            <div className="flex flex-col gap-1 py-0.5 min-w-[170px]">
+              <div className="flex items-center gap-1.5">
+                <Badge
+                  variant="outline"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedStockForStrategy(row);
+                    setIsStrategyModalOpen(true);
+                  }}
+                  title={signal?.message || "Click to set or adjust targets"}
+                  className={`cursor-pointer transition-all hover:scale-105 select-none font-medium text-[11px] px-2 py-0.5 flex items-center gap-1 shrink-0 ${signal?.badgeClass || ""}`}
+                >
+                  <Icon className="h-3 w-3 shrink-0" />
+                  <span>{signal?.badgeLabel || "Neutral"}</span>
+                </Badge>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedStockForStrategy(row);
+                    setIsStrategyModalOpen(true);
+                  }}
+                  title={target ? "Edit strategy and targets" : "Set strategy condition & price targets"}
+                  className={`h-6 w-6 p-0 shrink-0 ${target ? "text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/40" : "text-muted-foreground/60 hover:text-foreground hover:bg-muted"}`}
+                >
+                  <Target className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+
+              {/* Target and Stop-loss info if set */}
+              {target?.targetPrice || target?.stopLossPrice ? (
+                <div className="flex flex-wrap items-center gap-x-2 text-[10px] font-mono text-muted-foreground">
+                  {target.targetPrice ? (
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold" title={`Target Sell Price: ₹${target.targetPrice}`}>
+                      🎯 ₹{target.targetPrice.toLocaleString("en-IN")}
+                      {signal?.distanceToTargetPct !== undefined && (
+                        <span className="text-muted-foreground font-normal ml-0.5">
+                          ({signal.distanceToTargetPct > 0 ? "+" : ""}{signal.distanceToTargetPct.toFixed(1)}%)
+                        </span>
+                      )}
+                    </span>
+                  ) : null}
+                  {target.stopLossPrice ? (
+                    <span className="text-rose-600 dark:text-rose-400 font-semibold" title={`Stop-loss: ₹${target.stopLossPrice}`}>
+                      🛡️ ₹{target.stopLossPrice.toLocaleString("en-IN")}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Investment Thesis / Notes or prompt to set */}
+              {target?.notes ? (
+                <span
+                  className="text-[10px] text-muted-foreground truncate max-w-[200px] italic cursor-pointer hover:text-foreground"
+                  title={`Investment Thesis: "${target.notes}"`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedStockForStrategy(row);
+                    setIsStrategyModalOpen(true);
+                  }}
+                >
+                  "{target.notes}"
+                </span>
+              ) : !target ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedStockForStrategy(row);
+                    setIsStrategyModalOpen(true);
+                  }}
+                  className="text-left text-[10px] text-muted-foreground/70 hover:text-indigo-600 hover:underline flex items-center gap-1 w-fit transition-colors cursor-pointer"
+                >
+                  <span>+ Set goal / thesis</span>
+                </button>
+              ) : null}
             </div>
           );
         },
@@ -548,6 +764,122 @@ export function DirectStocksAnalyzer() {
         </CardHeader>
       </Card>
 
+      {/* Signals & Strategy Targets Filter Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 p-3 rounded-lg border bg-card/60 backdrop-blur-sm text-xs shadow-xs">
+        <div className="flex items-center gap-1.5 font-medium text-muted-foreground mr-1">
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          <span>Signals & Alerts:</span>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setSignalFilter("ALL")}
+          className={`px-2.5 py-1 rounded-full transition-all text-xs font-medium border cursor-pointer ${
+            signalFilter === "ALL"
+              ? "bg-foreground text-background border-foreground font-semibold shadow-xs"
+              : "bg-background text-muted-foreground hover:text-foreground border-border hover:bg-muted/50"
+          }`}
+        >
+          All ({signalCounts.total})
+        </button>
+
+        {signalCounts.targetMet > 0 && (
+          <button
+            type="button"
+            onClick={() => setSignalFilter("TARGET_REACHED")}
+            className={`px-2.5 py-1 rounded-full transition-all text-xs font-medium border flex items-center gap-1 cursor-pointer ${
+              signalFilter === "TARGET_REACHED"
+                ? "bg-blue-600 text-white border-blue-600 shadow-xs font-semibold"
+                : "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30 hover:bg-blue-500/20"
+            }`}
+          >
+            <Info className="h-3 w-3" />
+            Target Met ({signalCounts.targetMet})
+          </button>
+        )}
+
+        {signalCounts.stopLoss > 0 && (
+          <button
+            type="button"
+            onClick={() => setSignalFilter("STOP_LOSS_HIT")}
+            className={`px-2.5 py-1 rounded-full transition-all text-xs font-medium border flex items-center gap-1 cursor-pointer ${
+              signalFilter === "STOP_LOSS_HIT"
+                ? "bg-rose-600 text-white border-rose-600 shadow-xs font-semibold"
+                : "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30 hover:bg-rose-500/20"
+            }`}
+          >
+            <ShieldAlert className="h-3 w-3" />
+            Stop Loss Hit ({signalCounts.stopLoss})
+          </button>
+        )}
+
+        {signalCounts.nearLow > 0 && (
+          <button
+            type="button"
+            onClick={() => setSignalFilter("NEAR_52W_LOW")}
+            className={`px-2.5 py-1 rounded-full transition-all text-xs font-medium border flex items-center gap-1 cursor-pointer ${
+              signalFilter === "NEAR_52W_LOW"
+                ? "bg-red-600 text-white border-red-600 shadow-xs font-semibold"
+                : "bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/30 hover:bg-red-500/20"
+            }`}
+          >
+            <AlertTriangle className="h-3 w-3" />
+            Near 52W Low ({signalCounts.nearLow})
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setSignalFilter("ABOVE_52W_AVG")}
+          className={`px-2.5 py-1 rounded-full transition-all text-xs font-medium border flex items-center gap-1 cursor-pointer ${
+            signalFilter === "ABOVE_52W_AVG"
+              ? "bg-emerald-600 text-white border-emerald-600 shadow-xs font-semibold"
+              : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/20"
+          }`}
+        >
+          <TrendingUp className="h-3 w-3" />
+          Above 52W Avg ({signalCounts.aboveAvg})
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setSignalFilter("BELOW_52W_AVG")}
+          className={`px-2.5 py-1 rounded-full transition-all text-xs font-medium border flex items-center gap-1 cursor-pointer ${
+            signalFilter === "BELOW_52W_AVG"
+              ? "bg-amber-600 text-white border-amber-600 shadow-xs font-semibold"
+              : "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 hover:bg-amber-500/20"
+          }`}
+        >
+          <TrendingDown className="h-3 w-3" />
+          Below 52W Avg ({signalCounts.belowAvg})
+        </button>
+
+        <div className="h-4 w-px bg-border my-auto mx-0.5" />
+
+        <button
+          type="button"
+          onClick={() => setSignalFilter("WITH_PLAN")}
+          className={`px-2.5 py-1 rounded-full transition-all text-xs font-medium border flex items-center gap-1 cursor-pointer ${
+            signalFilter === "WITH_PLAN"
+              ? "bg-indigo-600 text-white border-indigo-600 shadow-xs font-semibold"
+              : "bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/20"
+          }`}
+        >
+          <Target className="h-3 w-3" />
+          With Strategy Plan ({signalCounts.withPlan})
+        </button>
+
+        {signalFilter !== "ALL" && (
+          <button
+            type="button"
+            onClick={() => setSignalFilter("ALL")}
+            className="text-xs text-muted-foreground hover:text-foreground underline ml-auto cursor-pointer"
+          >
+            Reset filter
+          </button>
+        )}
+      </div>
+
       {Object.entries(groupedStocks)
         .filter(([_, items]) => items.length > 0)
         .map(([groupName, items]) => {
@@ -636,6 +968,15 @@ export function DirectStocksAnalyzer() {
       <SyncLogsModal
         open={isLogsOpen}
         onOpenChange={setIsLogsOpen}
+      />
+
+      <StockStrategyModal
+        open={isStrategyModalOpen}
+        onOpenChange={setIsStrategyModalOpen}
+        stock={selectedStockForStrategy}
+        existingTarget={selectedStockForStrategy?._target}
+        onSave={saveStockTarget}
+        onDelete={deleteStockTarget}
       />
     </div>
   );
