@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { parseNumber, inferAssetType, combinePortfolios } from "./parser";
+import { 
+  parseNumber, 
+  inferAssetType, 
+  combinePortfolios, 
+  isSameStatementGroup,
+  ParsedStatement 
+} from "./parser";
 import { Holding } from "./types";
 
 describe("parser utils", () => {
@@ -43,5 +49,60 @@ describe("parser utils", () => {
     expect(combined.people.find(p => p.id === "Abhinav")).toBeDefined();
     expect(combined.people.find(p => p.id === "Mamta")).toBeDefined();
     expect(combined.holdings.length).toBe(3);
+  });
+
+  it("replaces older statements of the same type for the same user with newer dated file", () => {
+    const olderStockStmt: ParsedStatement = {
+      ownerId: "Abhinav Rai",
+      ucc: "9020149214",
+      statementType: "stock",
+      statementDate: "2026-10-29",
+      statementTimestamp: new Date(2026, 9, 29).getTime(),
+      holdings: [
+        { id: "h1", ownerId: "Abhinav Rai", name: "Old Stock A", assetType: "stock", investedValue: 100, currentValue: 110, absoluteReturn: 10, returnPercentage: 10 } as Holding
+      ]
+    };
+
+    const newerStockStmt: ParsedStatement = {
+      ownerId: "Abhinav Rai",
+      ucc: "9020149214",
+      statementType: "stock",
+      statementDate: "2026-11-04",
+      statementTimestamp: new Date(2026, 10, 4).getTime(),
+      holdings: [
+        { id: "h2", ownerId: "Abhinav Rai", name: "New Stock B", assetType: "stock", investedValue: 200, currentValue: 250, absoluteReturn: 50, returnPercentage: 25 } as Holding
+      ]
+    };
+
+    const mfStmt: ParsedStatement = {
+      ownerId: "Abhinav Rai",
+      ucc: "9020149214",
+      statementType: "mutual_fund",
+      statementDate: "2026-10-30",
+      statementTimestamp: new Date(2026, 9, 30).getTime(),
+      holdings: [
+        { id: "h3", ownerId: "Abhinav Rai", name: "Fund C", assetType: "mutual_fund", investedValue: 300, currentValue: 350, absoluteReturn: 50, returnPercentage: 16.67 } as Holding
+      ]
+    };
+
+    // Both older and newer stock statements passed
+    const combined = combinePortfolios([olderStockStmt, newerStockStmt, mfStmt]);
+
+    // Holdings should contain the NEW stock statement and the MF statement, NOT the old stock statement
+    expect(combined.holdings.length).toBe(2);
+    expect(combined.holdings.some(h => h.name === "New Stock B")).toBe(true);
+    expect(combined.holdings.some(h => h.name === "Fund C")).toBe(true);
+    expect(combined.holdings.some(h => h.name === "Old Stock A")).toBe(false);
+  });
+
+  it("checks same statement group correctly", () => {
+    const s1 = { ownerId: "Abhinav Rai", ucc: "9020149214", statementType: "stock" };
+    const s2 = { ownerId: "Abhinav  Rai", ucc: "9020149214", statementType: "stock" };
+    const s3 = { ownerId: "Abhinav Rai", ucc: "9020149214", statementType: "mutual_fund" };
+    const s4 = { ownerId: "Mamta Rai", ucc: "4957600521", statementType: "stock" };
+
+    expect(isSameStatementGroup(s1, s2)).toBe(true);
+    expect(isSameStatementGroup(s1, s3)).toBe(false); // different asset type
+    expect(isSameStatementGroup(s1, s4)).toBe(false); // different owner
   });
 });

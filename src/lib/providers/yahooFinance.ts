@@ -165,7 +165,7 @@ export async function fetchYahooStockPricesBatch(symbols: string[]): Promise<Map
           const change = Number.isFinite(q.regularMarketChange) ? q.regularMarketChange : undefined;
           const changePct = Number.isFinite(q.regularMarketChangePercent) ? q.regularMarketChangePercent : undefined;
           const return1y = Number.isFinite(q.fiftyTwoWeekChangePercent)
-            ? Number((q.fiftyTwoWeekChangePercent * 100).toFixed(2))
+            ? Number(q.fiftyTwoWeekChangePercent.toFixed(2))
             : undefined;
 
           results.set(q.symbol.toUpperCase(), {
@@ -224,7 +224,7 @@ export async function fetchYahooStockPrice(query: string): Promise<LiveData | nu
         const change = Number.isFinite(quote.regularMarketChange) ? quote.regularMarketChange : undefined;
         const changePct = Number.isFinite(quote.regularMarketChangePercent) ? quote.regularMarketChangePercent : undefined;
         const return1y = Number.isFinite(quote.fiftyTwoWeekChangePercent)
-          ? Number((quote.fiftyTwoWeekChangePercent * 100).toFixed(2))
+          ? Number(quote.fiftyTwoWeekChangePercent.toFixed(2))
           : undefined;
 
         return {

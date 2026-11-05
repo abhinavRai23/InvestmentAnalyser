@@ -3,7 +3,8 @@ import {
   filterHoldings, 
   calculateMetrics, 
   getAllocationByAssetType, 
-  getAllocationByPerson 
+  getAllocationByPerson,
+  calculatePortfolioPeriodReturns,
 } from "./engine";
 import { Holding } from "./types";
 
@@ -106,5 +107,44 @@ describe("engine", () => {
     const validRatio = validNav / baseNav;
     const isValidSensible = validRatio <= 2.5 && validRatio >= 0.4;
     expect(isValidSensible).toBe(true);
+  });
+
+  it("calculates 1Y period returns correctly and sanitizes 100x corrupted values", () => {
+    const holdings: Holding[] = [
+      {
+        id: "stock-1",
+        ownerId: "Abhinav",
+        name: "TCS",
+        assetType: "stock",
+        investedValue: 100000,
+        currentValue: 100000,
+        absoluteReturn: 0,
+        returnPercentage: 0,
+        _liveReturn1y: -16.42,
+      } as Holding & { _liveReturn1y: number },
+      {
+        id: "stock-2",
+        ownerId: "Abhinav",
+        name: "Gold ETF",
+        assetType: "etf",
+        investedValue: 100000,
+        currentValue: 100000,
+        absoluteReturn: 0,
+        returnPercentage: 0,
+        // Legacy corrupted value (100x)
+        _liveReturn1y: 1291.58,
+      } as Holding & { _liveReturn1y: number },
+    ];
+
+    const result = calculatePortfolioPeriodReturns(holdings, {});
+    const return1y = result["1Y"];
+
+    expect(return1y).toBeDefined();
+    // TCS: -16.42% on 100k => -16,420
+    // Gold ETF sanitized: 12.92% on 100k => +12,920
+    // Total gain = -3,500 on 200k => -1.75%
+    expect(return1y.evaluatedValue).toBe(200000);
+    expect(return1y.gain).toBeCloseTo(-3500, 0);
+    expect(return1y.percentage).toBeCloseTo(-1.75, 1);
   });
 });

@@ -99,13 +99,17 @@ export function DirectStocksAnalyzer() {
         stock.oneDayReturnAbsolute ??
         (oneDayPct !== null ? (stock.currentValue * oneDayPct) / 100 : null);
 
-      const ret1y =
+      let ret1y =
         (stock as any)._liveReturn1y ??
         entry?.return_stats?.[0]?.return1y ??
         entry?.simple_return?.return1y ??
         entry?.stats?.return1y ??
         entry?.returns?.year1 ??
         entry?.year1Return;
+
+      if (typeof ret1y === "number" && Math.abs(ret1y) > 300) {
+        ret1y = Number((ret1y / 100).toFixed(2));
+      }
       const oneYearPct = typeof ret1y === "number" ? ret1y : null;
       const oneYearVal =
         oneYearPct !== null ? (stock.currentValue * oneYearPct) / 100 : null;

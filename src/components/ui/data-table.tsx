@@ -55,6 +55,8 @@ export function DataTable<T>({
         const aVal = a[sortConfig.key as keyof T] as any;
         const bVal = b[sortConfig.key as keyof T] as any;
 
+        if (aVal === null || aVal === undefined) return 1;
+        if (bVal === null || bVal === undefined) return -1;
         if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
         if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;

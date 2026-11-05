@@ -165,7 +165,10 @@ export function calculatePortfolioPeriodReturns(
 
       if (cfg.key === '1y') {
         const live1y = (h as any)._liveReturn1y;
-        const ret1y = typeof live1y === 'number' ? live1y : (entry?.return_stats?.[0]?.return1y ?? entry?.simple_return?.return1y);
+        let ret1y = typeof live1y === 'number' ? live1y : (entry?.return_stats?.[0]?.return1y ?? entry?.simple_return?.return1y);
+        if (typeof ret1y === 'number' && Math.abs(ret1y) > 300) {
+          ret1y = Number((ret1y / 100).toFixed(2));
+        }
         if (typeof ret1y === 'number') {
           totalWeightedGain += h.currentValue * (ret1y / 100);
           totalValEvaluated += h.currentValue;

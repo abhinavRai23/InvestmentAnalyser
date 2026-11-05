@@ -75,7 +75,24 @@ export function loadStoredLivePrices(): Record<string, LiveData> {
   if (typeof window === 'undefined') return {};
   try {
     const raw = localStorage.getItem(LIVE_PRICES_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      let needsResave = false;
+      for (const k of Object.keys(parsed)) {
+        if (typeof parsed[k]?.return1y === 'number' && Math.abs(parsed[k].return1y) > 300) {
+          parsed[k].return1y = Number((parsed[k].return1y / 100).toFixed(2));
+          needsResave = true;
+        }
+      }
+      if (needsResave) {
+        try {
+          localStorage.setItem(LIVE_PRICES_KEY, JSON.stringify(parsed));
+        } catch {
+          // ignore localStorage write errors
+        }
+      }
+      return parsed;
+    }
   } catch (e) {
     console.warn('Failed to load livePrices from localStorage', e);
   }
@@ -713,6 +730,11 @@ export const useFilteredHoldings = () => {
         : (live.changePct !== undefined ? (newCurrentValue * live.changePct / 100) : undefined);
       const oneDayReturnPercentage = live.changePct;
 
+      let ret1y = live.return1y;
+      if (typeof ret1y === 'number' && Math.abs(ret1y) > 300) {
+        ret1y = Number((ret1y / 100).toFixed(2));
+      }
+
       return {
         ...h,
         marketPrice: live.price,
@@ -721,7 +743,7 @@ export const useFilteredHoldings = () => {
         returnPercentage: h.investedValue > 0 ? ((newCurrentValue - h.investedValue) / h.investedValue) * 100 : 0,
         oneDayReturnAbsolute,
         oneDayReturnPercentage,
-        _liveReturn1y: live.return1y,
+        _liveReturn1y: ret1y,
       } as Holding & { _liveReturn1y?: number };
     }
     return h;

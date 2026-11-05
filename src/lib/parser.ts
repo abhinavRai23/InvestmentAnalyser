@@ -42,7 +42,104 @@ export function inferAssetType(name: string, isMF: boolean): AssetType {
   return "stock";
 }
 
-export function parseExcelStatement(fileBuffer: Buffer, filename: string): { ownerId: string; holdings: Holding[] } | null {
+export interface StatementMetadata {
+  ownerId: string;
+  ucc?: string;
+  statementType: 'mutual_fund' | 'stock';
+  statementDate?: string;
+  statementTimestamp: number;
+}
+
+export interface ParsedStatement extends StatementMetadata {
+  holdings: Holding[];
+}
+
+export function extractStatementMetadata(
+  fileBuffer: Buffer | ArrayBuffer,
+  filename: string
+): StatementMetadata {
+  const isMF = filename.toLowerCase().includes("mutual_fund") || filename.toLowerCase().includes("mf");
+  const statementType: 'mutual_fund' | 'stock' = isMF ? 'mutual_fund' : 'stock';
+
+  // Extract UCC from filename (e.g. Stocks_Holdings_Statement_9020149214_... or Mutual_Funds_9020149214_...)
+  const uccMatch = filename.match(/(\d{8,12})/);
+  let ucc = uccMatch ? uccMatch[1] : undefined;
+
+  let statementTimestamp = 0;
+  let statementDate: string | undefined = undefined;
+
+  // Extract dates from filename (e.g. 29-10-2026 or 30-10-2026_30-10-2026)
+  const dateMatches = Array.from(filename.matchAll(/(\d{2})[-/](\d{2})[-/](\d{4})/g));
+  if (dateMatches.length > 0) {
+    const lastMatch = dateMatches[dateMatches.length - 1];
+    const [, d, m, y] = lastMatch;
+    const parsed = new Date(Number(y), Number(m) - 1, Number(d));
+    if (!isNaN(parsed.getTime())) {
+      statementTimestamp = parsed.getTime();
+      statementDate = `${y}-${m}-${d}`;
+    }
+  }
+
+  let ownerId = "Unknown";
+
+  try {
+    const workbook = xlsx.read(fileBuffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const data = xlsx.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][];
+
+    if (data && data.length > 0) {
+      for (let i = 0; i < Math.min(data.length, 25); i++) {
+        const row = data[i];
+        if (!row || row.length === 0) continue;
+
+        const cell0 = String(row[0] || '').trim();
+        if (cell0 === 'Name' && row[1]) {
+          ownerId = String(row[1]).trim().replace(/\s+/g, ' ');
+        }
+        if (cell0 === 'Unique Client Code' && row[1]) {
+          ucc = String(row[1]).trim();
+        }
+
+        const joined = row.map(c => String(c || '')).join(' ');
+        const contentDateMatch = joined.match(/as on (\d{2})[-/](\d{2})[-/](\d{4})/i);
+        if (contentDateMatch) {
+          const [, d, m, y] = contentDateMatch;
+          const parsed = new Date(Number(y), Number(m) - 1, Number(d));
+          if (!isNaN(parsed.getTime())) {
+            statementTimestamp = parsed.getTime();
+            statementDate = `${y}-${m}-${d}`;
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore read errors
+  }
+
+  return {
+    ownerId,
+    ucc,
+    statementType,
+    statementDate,
+    statementTimestamp,
+  };
+}
+
+export function isSameStatementGroup(
+  a: { ownerId?: string; ucc?: string; statementType?: string },
+  b: { ownerId?: string; ucc?: string; statementType?: string }
+): boolean {
+  if (a.statementType && b.statementType && a.statementType !== b.statementType) return false;
+  if (a.ucc && b.ucc && a.ucc === b.ucc) return true;
+  if (a.ownerId && b.ownerId) {
+    return a.ownerId.trim().toLowerCase() === b.ownerId.trim().toLowerCase();
+  }
+  return false;
+}
+
+export function parseExcelStatement(fileBuffer: Buffer, filename: string): ParsedStatement | null {
+  const meta = extractStatementMetadata(fileBuffer, filename);
   const workbook = xlsx.read(fileBuffer, { type: 'buffer' });
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
@@ -50,17 +147,8 @@ export function parseExcelStatement(fileBuffer: Buffer, filename: string): { own
 
   if (!data || data.length === 0) return null;
 
-  let ownerId = "Unknown";
-  // Find owner name. E.g. ["Name", "Abhinav Rai"]
-  for (let i = 0; i < 20; i++) {
-    if (data[i] && String(data[i][0]).trim() === "Name" && data[i][1]) {
-      ownerId = String(data[i][1]).trim().replace(/\s+/g, ' '); // normalize spaces
-      break;
-    }
-  }
-
-  // Detect type by filename
-  const isMF = filename.toLowerCase().includes("mutual_fund") || filename.toLowerCase().includes("mf");
+  const ownerId = meta.ownerId;
+  const isMF = meta.statementType === 'mutual_fund';
   const holdings: Holding[] = [];
 
   let headerRowIdx = -1;
@@ -144,14 +232,47 @@ export function parseExcelStatement(fileBuffer: Buffer, filename: string): { own
     holdings.push(holding);
   }
 
-  return { ownerId, holdings };
+  return {
+    ownerId,
+    ucc: meta.ucc,
+    statementType: meta.statementType,
+    statementDate: meta.statementDate,
+    statementTimestamp: meta.statementTimestamp,
+    holdings,
+  };
 }
 
-export function combinePortfolios(parsedFiles: { ownerId: string; holdings: Holding[] }[]): PortfolioData {
+export function combinePortfolios(
+  parsedFiles: (ParsedStatement | { ownerId: string; holdings: Holding[] })[]
+): PortfolioData {
   const peopleMap = new Map<string, Person>();
-  const holdings: Holding[] = [];
+
+  // Deduplicate statements by (statementType, ucc || ownerId), keeping only the newest
+  const newestStatementMap = new Map<string, ParsedStatement | { ownerId: string; holdings: Holding[] }>();
 
   for (const file of parsedFiles) {
+    const parsed = file as Partial<ParsedStatement>;
+    const type = parsed.statementType || (parsed.holdings?.[0]?.assetType === 'mutual_fund' ? 'mutual_fund' : 'stock');
+    const ownerKey = (parsed.ucc || parsed.ownerId || 'unknown').trim().toLowerCase();
+    const groupKey = `${type}:${ownerKey}`;
+
+    const existing = newestStatementMap.get(groupKey);
+    if (!existing) {
+      newestStatementMap.set(groupKey, file);
+    } else {
+      const existingParsed = existing as Partial<ParsedStatement>;
+      const existingTs = existingParsed.statementTimestamp || 0;
+      const currentTs = parsed.statementTimestamp || 0;
+
+      // Keep the newer one (or the later one in the list if equal)
+      if (currentTs >= existingTs) {
+        newestStatementMap.set(groupKey, file);
+      }
+    }
+  }
+
+  const holdings: Holding[] = [];
+  for (const file of newestStatementMap.values()) {
     if (!peopleMap.has(file.ownerId)) {
       peopleMap.set(file.ownerId, { id: file.ownerId, name: file.ownerId });
     }

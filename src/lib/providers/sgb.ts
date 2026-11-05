@@ -67,11 +67,23 @@ export async function fetchSgbLivePrice(isin?: string, name?: string): Promise<L
         if (price) {
           const change = Number.isFinite(d.dayChange) ? d.dayChange : 0;
           const changePct = Number.isFinite(d.dayChangePerc) ? d.dayChangePerc : 0;
+          
+          let return1y: number | undefined = undefined;
+          try {
+            const gold = await getGoldSpotRatePerGram();
+            if (gold && typeof gold.return1y === "number") {
+              return1y = gold.return1y;
+            }
+          } catch {
+            // Ignore gold benchmark error
+          }
+
           return {
             price,
             date: new Date().toISOString(),
             change,
             changePct,
+            return1y,
           };
         }
       }

@@ -2,7 +2,14 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getServerPortfolioData } from '@/lib/serverData';
-import { parseExcelStatement, parseCustomAssetsExcel, combinePortfolios, generateBankFDTemplateWorkbook } from '@/lib/parser';
+import { 
+  parseExcelStatement, 
+  parseCustomAssetsExcel, 
+  combinePortfolios, 
+  generateBankFDTemplateWorkbook,
+  extractStatementMetadata,
+  isSameStatementGroup
+} from '@/lib/parser';
 import { getMFHoldingsData } from '@/lib/dataProvider';
 import { PortfolioData, CustomAsset, Person, Holding } from '@/lib/types';
 
@@ -78,15 +85,13 @@ export async function POST(request: Request) {
         const bytes = await file.arrayBuffer();
         const buffer = Buffer.from(bytes);
 
-        // If in local dev mode, save to disk for persistence
-        if (isLocalMode) {
-          const filePath = path.join(reportsDir, file.name);
-          fs.writeFileSync(filePath, buffer);
-        }
-
         // Check if file is a Bank / FD Custom Assets spreadsheet
         const customParsed = parseCustomAssetsExcel(buffer);
         if (customParsed && customParsed.assets.length > 0) {
+          if (isLocalMode) {
+            const filePath = path.join(reportsDir, file.name);
+            fs.writeFileSync(filePath, buffer);
+          }
           inMemoryCustomAssets.push(...customParsed.assets);
           if (customParsed.ownerId) {
             inMemoryPeopleMap.set(customParsed.ownerId, { id: customParsed.ownerId, name: customParsed.ownerId });
@@ -98,6 +103,35 @@ export async function POST(request: Request) {
         // Check if file is a Groww statement (Mutual Funds or Stocks)
         const parsed = parseExcelStatement(buffer, file.name);
         if (parsed) {
+          // If in local dev mode, save to disk and remove any older statement of same type & user
+          if (isLocalMode) {
+            try {
+              const existingFiles = fs.readdirSync(reportsDir).filter(f => f.endsWith('.xlsx') && !f.startsWith('~'));
+              for (const exFile of existingFiles) {
+                if (exFile === file.name) continue;
+                const exPath = path.join(reportsDir, exFile);
+                try {
+                  const exBuf = fs.readFileSync(exPath);
+                  const exMeta = extractStatementMetadata(exBuf, exFile);
+                  if (isSameStatementGroup(parsed, exMeta)) {
+                    // If new file is newer or same date, delete older existing file from disk
+                    if (parsed.statementTimestamp >= exMeta.statementTimestamp) {
+                      fs.unlinkSync(exPath);
+                      console.log(`[Upload] Removed older statement file "${exFile}" in favor of newer "${file.name}"`);
+                    }
+                  }
+                } catch {
+                  // ignore individual read/unlink error
+                }
+              }
+            } catch (err) {
+              console.warn("Error checking existing reports during upload:", err);
+            }
+
+            const filePath = path.join(reportsDir, file.name);
+            fs.writeFileSync(filePath, buffer);
+          }
+
           inMemoryStatements.push(parsed);
           savedCount++;
         } else {
