@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { TrendingUp, TrendingDown, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { isIndianMarketOpen } from "@/lib/marketHours";
 
 interface TickerItem {
   key: string;
@@ -18,30 +19,101 @@ interface TickerItem {
 export function MarketTicker() {
   const [tickerData, setTickerData] = useState<TickerItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isMarketOpen, setIsMarketOpen] = useState<boolean>(() => isIndianMarketOpen());
+  const [marketStatusMsg, setMarketStatusMsg] = useState<string>("");
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const fetchTicker = async () => {
+  const fetchTicker = useCallback(async () => {
     setIsLoading(true);
     try {
       const res = await fetch("/api/market-ticker");
       if (res.ok) {
         const data = await res.json();
         setTickerData(data.tickerData || []);
+        const open = typeof data.isMarketOpen === "boolean" ? data.isMarketOpen : isIndianMarketOpen();
+        setIsMarketOpen(open);
+        if (data.marketStatus) setMarketStatusMsg(data.marketStatus);
+        return open;
       }
     } catch (e) {
       console.error("Failed to fetch market ticker", e);
     } finally {
       setIsLoading(false);
     }
+    const fallbackOpen = isIndianMarketOpen();
+    setIsMarketOpen(fallbackOpen);
+    return fallbackOpen;
+  }, []);
+
+  const handleManualRefresh = async () => {
+    const open = await fetchTicker();
+    if (open && !intervalRef.current) {
+      intervalRef.current = setInterval(async () => {
+        if (!isIndianMarketOpen()) {
+          setIsMarketOpen(false);
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+          return;
+        }
+        const stillOpen = await fetchTicker();
+        if (!stillOpen && intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      }, 60000);
+    }
   };
 
   useEffect(() => {
-    fetchTicker();
-    const interval = setInterval(fetchTicker, 60000); // 1-minute live auto-refresh
-    return () => clearInterval(interval);
-  }, []);
+    let isMounted = true;
+
+    const startPollingIfOpen = async () => {
+      // 1. First call is always made on load to display quotes
+      const open = await fetchTicker();
+      if (!isMounted) return;
+
+      // 2. Only start 1-minute recurring calls if market is open (9:30 AM - 3:30 PM IST, Mon-Fri)
+      if (open) {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        intervalRef.current = setInterval(async () => {
+          if (!isIndianMarketOpen()) {
+            setIsMarketOpen(false);
+            if (intervalRef.current) {
+              clearInterval(intervalRef.current);
+              intervalRef.current = null;
+            }
+            return;
+          }
+
+          const stillOpen = await fetchTicker();
+          if (!stillOpen && intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+        }, 60000);
+      } else {
+        // Market is closed; do not poll every minute
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      }
+    };
+
+    startPollingIfOpen();
+
+    return () => {
+      isMounted = false;
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [fetchTicker]);
 
   if (tickerData.length === 0 && !isLoading) return null;
-
 
   const formatPrice = (item: TickerItem) => {
     if (item.key === "usdinr") return `₹${item.price.toFixed(2)}`;
@@ -54,14 +126,27 @@ export function MarketTicker() {
   return (
     <div className="sticky top-0 z-50 w-full bg-card/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-border/80 shadow-2xs transition-all">
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-1.5 flex items-center justify-between gap-3">
-        {/* Live Indicator */}
-        <div className="flex items-center space-x-2 shrink-0">
+        {/* Live / Closed Indicator */}
+        <div
+          className="flex items-center space-x-2 shrink-0 cursor-default"
+          title={
+            isMarketOpen
+              ? "Live Indian Market Hours (09:30 AM - 03:30 PM IST, Mon - Fri)"
+              : marketStatusMsg || "Market Closed (Indian Market Hours: 09:30 AM - 03:30 PM IST, Mon - Fri)"
+          }
+        >
           <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            {isMarketOpen ? (
+              <>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </>
+            ) : (
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-slate-400 dark:bg-slate-500"></span>
+            )}
           </span>
           <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground hidden sm:inline-block">
-            Live Markets
+            {isMarketOpen ? "Live Markets" : "Market Closed"}
           </span>
         </div>
 
@@ -94,8 +179,11 @@ export function MarketTicker() {
                       <TrendingDown className="h-3 w-3 text-rose-500" />
                     )}
                     <span
-                      className={`font-mono text-[11px] font-semibold ${isPos ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
-                        }`}
+                      className={`font-mono text-[11px] font-semibold ${
+                        isPos
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-rose-600 dark:text-rose-400"
+                      }`}
                     >
                       {isPos ? "+" : ""}
                       {item.changePct.toFixed(2)}%
@@ -107,13 +195,12 @@ export function MarketTicker() {
           )}
         </div>
 
-
         {/* Ticker Refresh Action & Theme Toggle */}
         <div className="flex items-center space-x-1 shrink-0">
           <Button
             variant="ghost"
             size="icon"
-            onClick={fetchTicker}
+            onClick={handleManualRefresh}
             disabled={isLoading}
             className="h-7 w-7 text-muted-foreground hover:text-foreground"
             title="Refresh Market Indices"

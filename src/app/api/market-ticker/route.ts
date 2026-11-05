@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import YahooFinance from "yahoo-finance2";
+import { getIndianMarketStatus } from "@/lib/marketHours";
 
 export const dynamic = "force-dynamic";
 
@@ -109,7 +110,13 @@ export async function GET() {
     );
 
     const filtered = results.filter(Boolean);
-    return NextResponse.json({ tickerData: filtered });
+    const marketStatus = getIndianMarketStatus();
+    return NextResponse.json({
+      tickerData: filtered,
+      isMarketOpen: marketStatus.isOpen,
+      marketStatus: marketStatus.reason,
+      istTime: marketStatus.istTimeString,
+    });
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message || "Failed" },
